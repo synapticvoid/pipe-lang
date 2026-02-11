@@ -1,6 +1,6 @@
 # Pipe Lang
 
-Toy language implementation, ported from Python to Zig as a learning exercise.
+Toy language implementation, ported from Python to Zig 0.15.2 as a learning exercise.
 
 ## Project structure
 

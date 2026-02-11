@@ -11,6 +11,7 @@ pub const Lexer = struct {
     current: usize,
     line: usize,
     tokens: std.ArrayList(Token),
+    allocator: std.mem.Allocator,
 
     pub fn init(source: []const u8, allocator: std.mem.Allocator) Lexer {
         return .{
@@ -18,12 +19,13 @@ pub const Lexer = struct {
             .start = 0,
             .current = 0,
             .line = 1,
-            .tokens = std.ArrayList(Token).init(allocator),
+            .tokens = .{},
+            .allocator = allocator,
         };
     }
 
     pub fn deinit(self: *Lexer) void {
-        self.tokens.deinit();
+        self.tokens.deinit(self.allocator);
     }
 
     pub fn tokenize(self: *Lexer) ![]const Token {
@@ -32,7 +34,7 @@ pub const Lexer = struct {
             try self.scanToken();
         }
 
-        try self.tokens.append(.{
+        try self.tokens.append(self.allocator, .{
             .type = .eof,
             .lexeme = "",
             .line = self.line,
@@ -74,7 +76,7 @@ pub const Lexer = struct {
 
     fn addToken(self: *Lexer, token_type: TokenType, literal: ?[]const u8) !void {
         const lexeme = literal orelse self.source[self.start..self.current];
-        try self.tokens.append(.{
+        try self.tokens.append(self.allocator, .{
             .type = token_type,
             .lexeme = lexeme,
             .line = self.line,
