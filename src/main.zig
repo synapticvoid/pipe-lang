@@ -1,10 +1,10 @@
 const std = @import("std");
-const pipe_lang = @import("pipe_lang");
+const pipe = @import("pipe");
 
 pub fn main() !void {
     // Prints to stderr, ignoring potential errors.
     std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
-    try pipe_lang.bufferedPrint();
+    try pipe.bufferedPrint();
 }
 
 test "simple test" {

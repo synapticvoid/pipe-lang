@@ -28,7 +28,7 @@ pub fn build(b: *std.Build) void {
     // to our consumers. We must give it a name because a Zig package can expose
     // multiple modules and consumers will need to be able to specify which
     // module they want to access.
-    const mod = b.addModule("pipe_lang", .{
+    const mod = b.addModule("pipe", .{
         // The root source file is the "entry point" of this module. Users of
         // this module will only be able to access public declarations contained
         // in this file, which means that if you have declarations that you
@@ -58,7 +58,7 @@ pub fn build(b: *std.Build) void {
     // If neither case applies to you, feel free to delete the declaration you
     // don't need and to put everything under a single module.
     const exe = b.addExecutable(.{
-        .name = "pipe_lang",
+        .name = "pipe",
         .root_module = b.createModule(.{
             // b.createModule defines a new module just like b.addModule but,
             // unlike b.addModule, it does not expose the module to consumers of
@@ -73,12 +73,12 @@ pub fn build(b: *std.Build) void {
             // List of modules available for import in source files part of the
             // root module.
             .imports = &.{
-                // Here "pipe_lang" is the name you will use in your source code to
-                // import this module (e.g. `@import("pipe_lang")`). The name is
+                // Here "pipe" is the name you will use in your source code to
+                // import this module (e.g. `@import("pipe")`). The name is
                 // repeated because you are allowed to rename your imports, which
                 // can be extremely useful in case of collisions (which can happen
                 // importing modules from different packages).
-                .{ .name = "pipe_lang", .module = mod },
+                .{ .name = "pipe", .module = mod },
             },
         }),
     });
@@ -135,12 +135,24 @@ pub fn build(b: *std.Build) void {
     // A run step that will run the second test executable.
     const run_exe_tests = b.addRunArtifact(exe_tests);
 
+    const lexer_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/tests/lexer_test.zig"),
+            .target = target,
+            .imports = &.{
+                .{ .name = "pipe", .module = mod },
+            },
+        }),
+    });
+    const run_lexer_tests = b.addRunArtifact(lexer_tests);
+
     // A top level step for running all tests. dependOn can be called multiple
     // times and since the two run steps do not depend on one another, this will
     // make the two of them run in parallel.
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_mod_tests.step);
     test_step.dependOn(&run_exe_tests.step);
+    test_step.dependOn(&run_lexer_tests.step);
 
     // Just like flags, top level steps are also listed in the `--help` menu.
     //
