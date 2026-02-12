@@ -11,3 +11,15 @@ pub fn parse(source: []const u8, allocator: std.mem.Allocator) ![]const pipe.ast
     var parser = pipe.Parser.init(tokens, allocator);
     return try parser.parse();
 }
+
+pub fn evaluate(source: []const u8, allocator: std.mem.Allocator) !pipe.ast.Value {
+    const tokens = try tokenize(source, allocator);
+    var parser = pipe.Parser.init(tokens, allocator);
+    const statements = try parser.parse();
+    var interpreter = pipe.Interpreter{};
+    var result: pipe.ast.Value = .null;
+    for (statements) |statement| {
+        result = try interpreter.evaluate(statement.expression);
+    }
+    return result;
+}

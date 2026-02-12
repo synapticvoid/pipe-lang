@@ -25,5 +25,12 @@ pub const Value = union(enum) {
     string: []const u8,
     boolean: bool,
     null,
+
+    pub fn asNumber(self: Value) !f64 {
+        switch (self) {
+            .number => |n| return n,
+            else => return error.TypeError,
+        }
+    }
 };
 

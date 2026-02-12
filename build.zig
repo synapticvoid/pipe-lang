@@ -166,6 +166,18 @@ pub fn build(b: *std.Build) void {
     });
     const run_parser_tests = b.addRunArtifact(parser_tests);
 
+    const interpreter_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/tests/interpreter_test.zig"),
+            .target = target,
+            .imports = &.{
+                .{ .name = "pipe", .module = mod },
+                .{ .name = "helpers", .module = helpers_mod },
+            },
+        }),
+    });
+    const run_interpreter_tests = b.addRunArtifact(interpreter_tests);
+
     // A top level step for running all tests. dependOn can be called multiple
     // times and since the two run steps do not depend on one another, this will
     // make the two of them run in parallel.
@@ -174,6 +186,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_exe_tests.step);
     test_step.dependOn(&run_lexer_tests.step);
     test_step.dependOn(&run_parser_tests.step);
+    test_step.dependOn(&run_interpreter_tests.step);
 
     // Just like flags, top level steps are also listed in the `--help` menu.
     //

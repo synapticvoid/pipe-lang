@@ -3,7 +3,7 @@
   <component name="BuildScanner">
     <option name="projects">
       <list><![CDATA[{
-  "name": "pipe_lang",
+  "name": "pipe",
   "version": "0.0.0",
   "path": "/home/robin/projects/robin/pipe-lang",
   "steps": [
@@ -39,7 +39,29 @@
       "public": false,
       "imports": [
         {
-          "name": "pipe_lang",
+          "name": "pipe",
+          "owner": 0,
+          "module": 0
+        }
+      ]
+    },
+    {
+      "root": "src/tests/lexer_test.zig",
+      "public": false,
+      "imports": [
+        {
+          "name": "pipe",
+          "owner": 0,
+          "module": 0
+        }
+      ]
+    },
+    {
+      "root": "src/tests/parser_test.zig",
+      "public": false,
+      "imports": [
+        {
+          "name": "pipe",
           "owner": 0,
           "module": 0
         }
@@ -50,5 +72,5 @@
 }]]></list>
     </option>
   </component>
-  <component name="ZigToolchain" toolchain="27e2130b-cbf9-41ab-9d3b-da72a9bc7abd" />
+  <component name="ZigToolchain" toolchain="d42d1605-3bd7-417c-b31b-83f4e5800970" />
 </project>

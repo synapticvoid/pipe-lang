@@ -8,6 +8,7 @@ pub const Parser = struct {
     tokens: []const Token,
     current: usize,
     allocator: std.mem.Allocator,
+    last_error: ?[]const u8 = null,
 
     pub fn init(tokens: []const Token, allocator: std.mem.Allocator) Parser {
         return .{
@@ -46,6 +47,12 @@ pub const Parser = struct {
             return ast.Expression{
                 .literal = .{ .value = .{ .number = value } },
             };
+        }
+
+        if (self.match(&.{TokenType.lparen})) {
+            const expr = try self.parseExpression();
+            _ = try self.consume(TokenType.rparen, "Expect ')' after expression.");
+            return expr;
         }
 
         return error.UnexpectedToken;
@@ -95,6 +102,14 @@ pub const Parser = struct {
             }
         }
         return false;
+    }
+
+    fn consume(self: *Parser, token_type: TokenType, error_message: []const u8) !Token {
+        if (self.check(token_type)) {
+            return self.advance();
+        }
+        self.last_error = error_message;
+        return error.UnexpectedToken;
     }
 
     fn check(self: *const Parser, t: TokenType) bool {
