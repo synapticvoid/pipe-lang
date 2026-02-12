@@ -1,6 +1,10 @@
 const tokens = @import("tokens.zig");
 const Token = tokens.Token;
 
+pub const ASTNode = union(enum) {
+    expression: Expression,
+};
+
 pub const Expression = union(enum) {
     literal: Literal,
     binary: *Binary, // * to break the cycle of a recursive definition
@@ -22,3 +26,4 @@ pub const Value = union(enum) {
     boolean: bool,
     null,
 };
+

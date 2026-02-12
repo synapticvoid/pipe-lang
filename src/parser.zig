@@ -1,0 +1,106 @@
+const std = @import("std");
+const tok = @import("tokens.zig");
+const ast = @import("ast.zig");
+const Token = tok.Token;
+const TokenType = tok.TokenType;
+
+pub const Parser = struct {
+    tokens: []const Token,
+    current: usize,
+    allocator: std.mem.Allocator,
+
+    pub fn init(tokens: []const Token, allocator: std.mem.Allocator) Parser {
+        return .{
+            .tokens = tokens,
+            .current = 0,
+            .allocator = allocator,
+        };
+    }
+
+    pub fn parse(self: *Parser) ![]ast.ASTNode {
+        var statements: std.ArrayList(ast.ASTNode) = .{};
+
+        while (!self.isAtEnd()) {
+            try statements.append(self.allocator, .{ .expression = try self.parseExpression() });
+        }
+        return statements.items;
+    }
+
+    // NOTE: -- Expressions
+
+    fn parseExpression(self: *Parser) !ast.Expression {
+        return self.parseTerm();
+    }
+
+    fn parseTerm(self: *Parser) !ast.Expression {
+        return self.parseBinaryLeft(parseFactor, &.{ .plus, .minus });
+    }
+
+    fn parseFactor(self: *Parser) !ast.Expression {
+        return self.parseBinaryLeft(parsePrimary, &.{ .star, .slash });
+    }
+
+    fn parsePrimary(self: *Parser) !ast.Expression {
+        if (self.match(&.{TokenType.number})) {
+            const value = try std.fmt.parseFloat(f64, self.previous().lexeme);
+            return ast.Expression{
+                .literal = .{ .value = .{ .number = value } },
+            };
+        }
+
+        return error.UnexpectedToken;
+    }
+
+    // NOTE: -- Utils
+
+    fn parseBinaryLeft(self: *Parser, parse_operand: *const fn (*Parser) anyerror!ast.Expression, operators: []const TokenType) !ast.Expression {
+        var left = try parse_operand(self);
+
+        while (self.match(operators)) {
+            const operator = self.previous();
+            const right = try parse_operand(self);
+            const binary = try self.allocator.create(ast.Expression.Binary);
+            // .* to dereference the pointer (*Binary allocated on the heap)
+            binary.* = .{ .left = left, .operator = operator, .right = right };
+            left = .{ .binary = binary };
+        }
+
+        return left;
+    }
+
+    fn isAtEnd(self: *const Parser) bool {
+        return self.peek().type == TokenType.eof;
+    }
+
+    fn peek(self: *const Parser) Token {
+        return self.tokens[self.current];
+    }
+
+    fn previous(self: *const Parser) Token {
+        return self.tokens[self.current - 1];
+    }
+
+    fn advance(self: *Parser) Token {
+        if (!self.isAtEnd()) {
+            self.current += 1;
+        }
+        return self.previous();
+    }
+
+    fn match(self: *Parser, types: []const TokenType) bool {
+        for (types) |t| {
+            if (self.check(t)) {
+                _ = self.advance();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    fn check(self: *const Parser, t: TokenType) bool {
+        if (self.isAtEnd()) {
+            return false;
+        }
+        return self.peek().type == t;
+    }
+};
