@@ -25,7 +25,7 @@ pub const TokenType = enum {
 
     // Literals
     identifier,
-    number,
+    int,
     string,
 
     // Keywords

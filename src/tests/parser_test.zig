@@ -11,8 +11,8 @@ test "parse term" {
 
     const bin = result[0].expression.binary;
     try std.testing.expectEqual(.plus, bin.operator.type);
-    try std.testing.expectEqual(3.0, bin.left.literal.value.number);
-    try std.testing.expectEqual(2.0, bin.right.literal.value.number);
+    try std.testing.expectEqual(3.0, bin.left.literal.value.int);
+    try std.testing.expectEqual(2.0, bin.right.literal.value.int);
 }
 
 test "parse factor" {
@@ -23,12 +23,12 @@ test "parse factor" {
 
     const bin = result[0].expression.binary;
     try std.testing.expectEqual(.plus, bin.operator.type);
-    try std.testing.expectEqual(3.0, bin.left.literal.value.number);
+    try std.testing.expectEqual(3.0, bin.left.literal.value.int);
 
     const right = bin.right.binary;
     try std.testing.expectEqual(.star, right.operator.type);
-    try std.testing.expectEqual(2.0, right.left.literal.value.number);
-    try std.testing.expectEqual(4.0, right.right.literal.value.number);
+    try std.testing.expectEqual(2.0, right.left.literal.value.int);
+    try std.testing.expectEqual(4.0, right.right.literal.value.int);
 }
 
 test "parse comparison and equality precedence" {
@@ -44,9 +44,9 @@ test "parse comparison and equality precedence" {
     // left side: 3 > 2
     const cmp = eq.left.binary;
     try std.testing.expectEqual(.greater, cmp.operator.type);
-    try std.testing.expectEqual(3.0, cmp.left.literal.value.number);
-    try std.testing.expectEqual(2.0, cmp.right.literal.value.number);
+    try std.testing.expectEqual(3.0, cmp.left.literal.value.int);
+    try std.testing.expectEqual(2.0, cmp.right.literal.value.int);
 
     // right side: 4
-    try std.testing.expectEqual(4.0, eq.right.literal.value.number);
+    try std.testing.expectEqual(4.0, eq.right.literal.value.int);
 }

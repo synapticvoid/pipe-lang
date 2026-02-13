@@ -1,23 +1,37 @@
-  const std = @import("std");
-  const helpers = @import("helpers");
+const std = @import("std");
+const helpers = @import("helpers");
 
-  test "evaluate factor" {
-      var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-      defer arena.deinit();
-      const result = try helpers.evaluate("3 + 2 * 4;", arena.allocator());
-      try std.testing.expectEqual(11.0, result.number);
-  }
+test "math operations" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
 
-  test "evaluate comparison" {
-      var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-      defer arena.deinit();
-      const result = try helpers.evaluate("3 + 2 > 4;", arena.allocator());
-      try std.testing.expectEqual(true, result.boolean);
-  }
+    const cases = .{
+        // arithmetic
+        .{ "3 + 2 * 4;", "11" },
+        .{ "10 - 3;", "7" },
+        .{ "6 / 2;", "3" },
 
-  test "evaluate equality" {
-      var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-      defer arena.deinit();
-      const result = try helpers.evaluate("3 + 2 == 4;", arena.allocator());
-      try std.testing.expectEqual(false, result.boolean);
-  }
+        // comparison
+        .{ "3 + 2 > 4;", "true" },
+        .{ "3 + 2 == 4;", "false" },
+        .{ "3 + 2 == 5;", "true" },
+        .{ "1 != 2;", "true" },
+        .{ "3 <= 3;", "true" },
+        .{ "3 >= 4;", "false" },
+
+        // unary
+        .{ "-5;", "-5" },
+        .{ "--5;", "5" },
+        .{ "-(3 + 2);", "-5" },
+        .{ "!0;", "true" },
+        .{ "!1;", "false" },
+        // TODO: add !true / !false once lexer handles boolean literals
+    };
+
+    inline for (cases) |case| {
+        var buf: [64]u8 = undefined;
+        const result = try helpers.evaluate(case[0], arena.allocator());
+        const actual = try std.fmt.bufPrint(&buf, "{f}", .{result});
+        try std.testing.expectEqualStrings(case[1], actual);
+    }
+}

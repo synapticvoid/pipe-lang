@@ -10,9 +10,11 @@ Toy language implementation, ported from Python to Zig 0.15.2 as a learning exer
 
 ## Workflow
 
-- Build: `zig build`
+- Build: `make build` (or `zig build`)
 - Run: `zig build run`
-- Test: `zig build test`
+- Test: `make test` (or `zig build test`)
+- Install to `/usr/local/bin/`: `make install`
+- Show targets: `make help`
 
 ## Conventions
 

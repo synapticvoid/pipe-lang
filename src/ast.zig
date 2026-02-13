@@ -1,3 +1,4 @@
+const std = @import("std");
 const tokens = @import("tokens.zig");
 const Token = tokens.Token;
 
@@ -7,10 +8,16 @@ pub const Statement = union(enum) {
 
 pub const Expression = union(enum) {
     literal: Literal,
+    unary: *Unary,
     binary: *Binary, // * to break the cycle of a recursive definition
 
     pub const Literal = struct {
         value: Value,
+    };
+
+    pub const Unary = struct {
+        operator: Token,
+        right: Expression,
     };
 
     pub const Binary = struct {
@@ -21,15 +28,24 @@ pub const Expression = union(enum) {
 };
 
 pub const Value = union(enum) {
-    number: f64,
+    int: f64,
     string: []const u8,
     boolean: bool,
     null,
 
-    pub fn asNumber(self: Value) !f64 {
+    pub fn asInt(self: Value) !f64 {
         switch (self) {
-            .number => |n| return n,
+            .int => |n| return n,
             else => return error.TypeError,
+        }
+    }
+
+    pub fn format(self: Value, writer: anytype) !void {
+        switch (self) {
+            .int => |n| try writer.print("{d}", .{n}),
+            .string => |s| try writer.print("\"{s}\"", .{s}),
+            .boolean => |b| try writer.print("{any}", .{b}),
+            .null => try writer.writeAll("null"),
         }
     }
 };

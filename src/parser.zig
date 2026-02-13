@@ -64,14 +64,29 @@ pub const Parser = struct {
     }
 
     fn parseFactor(self: *Parser) !ast.Expression {
-        return self.parseBinaryLeft(parsePrimary, &.{ .star, .slash });
+        return self.parseBinaryLeft(parseUnary, &.{ .star, .slash });
+    }
+
+    fn parseUnary(self: *Parser) !ast.Expression {
+        if (self.match(&.{ TokenType.bang, TokenType.minus })) {
+            const operator = self.previous();
+            const right = try self.parseUnary();
+            const unary = try self.allocator.create(ast.Expression.Unary);
+            unary.* = .{
+                .operator = operator,
+                .right = right,
+            };
+
+            return .{ .unary = unary };
+        }
+        return self.parsePrimary();
     }
 
     fn parsePrimary(self: *Parser) !ast.Expression {
-        if (self.match(&.{TokenType.number})) {
+        if (self.match(&.{TokenType.int})) {
             const value = try std.fmt.parseFloat(f64, self.previous().lexeme);
             return ast.Expression{
-                .literal = .{ .value = .{ .number = value } },
+                .literal = .{ .value = .{ .int = value } },
             };
         }
 

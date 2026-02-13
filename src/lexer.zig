@@ -47,9 +47,19 @@ pub const Lexer = struct {
         const c = self.advance();
 
         switch (c) {
+            // Delimiters
+            '(' => try self.addToken(.lparen, null),
+            ')' => try self.addToken(.rparen, null),
+            '{' => try self.addToken(.lbrace, null),
+            '}' => try self.addToken(.rbrace, null),
+            ';' => try self.addToken(.semicolon, null),
+
+            // Single-character operators
             '+' => try self.addToken(.plus, null),
             '-' => try self.addToken(.minus, null),
             '*' => try self.addToken(.star, null),
+
+            // One or two character operators
             '/' => {
                 if (self.match('/')) {
                     // A line comment `//` goes until the end of the line.
@@ -61,11 +71,6 @@ pub const Lexer = struct {
 
                 try self.addToken(.slash, null);
             },
-            '(' => try self.addToken(.lparen, null),
-            ')' => try self.addToken(.rparen, null),
-            '{' => try self.addToken(.lbrace, null),
-            '}' => try self.addToken(.rbrace, null),
-            ';' => try self.addToken(.semicolon, null),
             '<' => {
                 if (self.match('=')) {
                     try self.addToken(.less_equal, null);
@@ -94,9 +99,11 @@ pub const Lexer = struct {
                     try self.addToken(.bang, null);
                 }
             },
-            '\n' => self.line += 1,
-            // Ignore whitespaces
+
+            // Whitespace
             ' ', '\r', '\t' => {},
+            '\n' => self.line += 1,
+
             else => {
                 if (isDigit(c)) {
                     try self.number();
@@ -164,7 +171,7 @@ pub const Lexer = struct {
             }
         }
 
-        // Here we have the full number!
-        try self.addToken(.number, null);
+        // Here we have the full int!
+        try self.addToken(.int, null);
     }
 };
