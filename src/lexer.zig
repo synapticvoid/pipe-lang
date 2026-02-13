@@ -50,7 +50,17 @@ pub const Lexer = struct {
             '+' => try self.addToken(.plus, null),
             '-' => try self.addToken(.minus, null),
             '*' => try self.addToken(.star, null),
-            '/' => try self.addToken(.slash, null),
+            '/' => {
+                if (self.match('/')) {
+                    // A line comment `//` goes until the end of the line.
+                    while (self.peek() != '\n' and !self.isAtEnd()) {
+                        _ = self.advance();
+                    }
+                    return;
+                }
+
+                try self.addToken(.slash, null);
+            },
             '(' => try self.addToken(.lparen, null),
             ')' => try self.addToken(.rparen, null),
             '{' => try self.addToken(.lbrace, null),
