@@ -27,10 +27,14 @@ pub const Parser = struct {
         return statements.items;
     }
 
+    // NOTE: -- Declarations
+
     fn parseDeclaration(self: *Parser) !ast.Statement {
         return try self.parseStatement();
     }
+
     // NOTE: -- Statements
+
     fn parseStatement(self: *Parser) !ast.Statement {
         return try self.parseExpressionStatement();
     }
@@ -44,7 +48,15 @@ pub const Parser = struct {
     // NOTE: -- Expressions
 
     fn parseExpression(self: *Parser) !ast.Expression {
-        return self.parseTerm();
+        return self.parseEquality();
+    }
+
+    fn parseEquality(self: *Parser) !ast.Expression {
+        return self.parseBinaryLeft(parseComparison, &.{ .equal_equal, .bang_equal });
+    }
+
+    fn parseComparison(self: *Parser) !ast.Expression {
+        return self.parseBinaryLeft(parseTerm, &.{ .greater, .greater_equal, .less, .less_equal });
     }
 
     fn parseTerm(self: *Parser) !ast.Expression {

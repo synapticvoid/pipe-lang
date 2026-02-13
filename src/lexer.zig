@@ -56,6 +56,34 @@ pub const Lexer = struct {
             '{' => try self.addToken(.lbrace, null),
             '}' => try self.addToken(.rbrace, null),
             ';' => try self.addToken(.semicolon, null),
+            '<' => {
+                if (self.match('=')) {
+                    try self.addToken(.less_equal, null);
+                } else {
+                    try self.addToken(.less, null);
+                }
+            },
+            '>' => {
+                if (self.match('=')) {
+                    try self.addToken(.greater_equal, null);
+                } else {
+                    try self.addToken(.greater, null);
+                }
+            },
+            '=' => {
+                if (self.match('=')) {
+                    try self.addToken(.equal_equal, null);
+                } else {
+                    try self.addToken(.equal, null);
+                }
+            },
+            '!' => {
+                if (self.match('=')) {
+                    try self.addToken(.bang_equal, null);
+                } else {
+                    try self.addToken(.bang, null);
+                }
+            },
             '\n' => self.line += 1,
             // Ignore whitespaces
             ' ', '\r', '\t' => {},
@@ -99,6 +127,18 @@ pub const Lexer = struct {
             return 0;
         }
         return self.source[self.current + 1];
+    }
+
+    fn match(self: *Lexer, expected: u8) bool {
+        if (self.isAtEnd()) {
+            return false;
+        }
+        if (self.source[self.current] != expected) {
+            return false;
+        }
+
+        self.current += 1;
+        return true;
     }
 
     fn number(self: *Lexer) !void {

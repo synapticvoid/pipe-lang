@@ -32,6 +32,14 @@ pub const Interpreter = struct {
                     .minus => return Value { .number = left_val - right_val },
                     .star => return Value { .number = left_val * right_val },
                     .slash => return Value { .number = left_val / right_val },
+
+                    .equal_equal => return Value{ .boolean = left_val == right_val },
+                    .bang_equal => return Value{ .boolean = left_val != right_val },
+                    .greater => return Value{ .boolean = left_val > right_val },
+                    .greater_equal => return Value{ .boolean = left_val >= right_val },
+                    .less => return Value{ .boolean = left_val < right_val },
+                    .less_equal => return Value{ .boolean = left_val <= right_val },
+
                     else => return InterpreterError.UnsupportedOperator,
                 }
             },
