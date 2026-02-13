@@ -18,13 +18,27 @@ pub const Parser = struct {
         };
     }
 
-    pub fn parse(self: *Parser) ![]ast.ASTNode {
-        var statements: std.ArrayList(ast.ASTNode) = .{};
+    pub fn parse(self: *Parser) ![]ast.Statement {
+        var statements: std.ArrayList(ast.Statement) = .{};
 
         while (!self.isAtEnd()) {
-            try statements.append(self.allocator, .{ .expression = try self.parseExpression() });
+            try statements.append(self.allocator, try self.parseDeclaration());
         }
         return statements.items;
+    }
+
+    fn parseDeclaration(self: *Parser) !ast.Statement {
+        return try self.parseStatement();
+    }
+    // NOTE: -- Statements
+    fn parseStatement(self: *Parser) !ast.Statement {
+        return try self.parseExpressionStatement();
+    }
+
+    fn parseExpressionStatement(self: *Parser) !ast.Statement {
+        const expr = try self.parseExpression();
+        _ = try self.consume(TokenType.semicolon, "Expect ; after expression");
+        return ast.Statement{ .expression = expr };
     }
 
     // NOTE: -- Expressions

@@ -11,7 +11,7 @@ pub const InterpreterError = error{
 };
 
 pub const Interpreter = struct {
-    pub fn interpret(self: *Interpreter, statements: []const ast.ASTNode) !void {
+    pub fn interpret(self: *Interpreter, statements: []const ast.Statement) !void {
         for (statements) |statement| {
             _ = try self.evaluate(statement.expression);
         }

@@ -1,7 +1,7 @@
 const tokens = @import("tokens.zig");
 const Token = tokens.Token;
 
-pub const ASTNode = union(enum) {
+pub const Statement = union(enum) {
     expression: Expression,
 };
 

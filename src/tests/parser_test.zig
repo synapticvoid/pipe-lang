@@ -7,7 +7,7 @@ test "parse term" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    const result = try helpers.parse("3 + 2", allocator);
+    const result = try helpers.parse("3 + 2;", allocator);
 
     const bin = result[0].expression.binary;
     try std.testing.expectEqual(.plus, bin.operator.type);
@@ -19,7 +19,7 @@ test "parse factor" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    const result = try helpers.parse("3 + 2 * 4", allocator);
+    const result = try helpers.parse("3 + 2 * 4;", allocator);
 
     const bin = result[0].expression.binary;
     try std.testing.expectEqual(.plus, bin.operator.type);

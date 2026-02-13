@@ -6,7 +6,7 @@ pub fn tokenize(source: []const u8, allocator: std.mem.Allocator) ![]const pipe.
     return try lexer.tokenize();
 }
 
-pub fn parse(source: []const u8, allocator: std.mem.Allocator) ![]const pipe.ast.ASTNode {
+pub fn parse(source: []const u8, allocator: std.mem.Allocator) ![]const pipe.ast.Statement {
     const tokens = try tokenize(source, allocator);
     var parser = pipe.Parser.init(tokens, allocator);
     return try parser.parse();
