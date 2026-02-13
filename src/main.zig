@@ -1,27 +1,68 @@
 const std = @import("std");
-const pipe = @import("pipe");
+const Lexer = @import("lexer.zig").Lexer;
+const Parser = @import("parser.zig").Parser;
+const Interpreter = @import("interpreter.zig").Interpreter;
+
+const max_file_size = 10 * 1024 * 1024;  // 10MB, should be plenty enough
+const max_input_size = 1024 * 1024;  // 1MB, should be plenty enough
+
+fn run(source: []const u8, allocator: std.mem.Allocator) void {
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    doRun(source, arena.allocator()) catch |err| {
+        std.debug.print("Error: {}\n", .{err});
+    };
+}
+fn doRun(source: []const u8, allocator: std.mem.Allocator) !void {
+    var lexer = Lexer.init(source, allocator);
+    const tokens = try lexer.tokenize();
+
+    var parser = Parser.init(tokens, allocator);
+    const statements = try parser.parse();
+
+    var interpreter = Interpreter{};
+    try interpreter.interpret(statements);
+}
+
+fn runFile(path: []const u8, allocator: std.mem.Allocator) !void {
+    const source = try std.fs.cwd().readFileAlloc(allocator, path, max_file_size);
+    defer allocator.free(source);
+    run(source, allocator);
+}
+
+fn repl(allocator: std.mem.Allocator) !void {
+    var stdout_buf: [4096]u8 = undefined;
+    var stdout_writer = std.fs.File.stdout().writer(&stdout_buf);
+    const stdout: *std.Io.Writer = &stdout_writer.interface;
+
+    var stdin_buf: [max_input_size]u8 = undefined;
+    var stdin_reader = std.fs.File.stdin().reader(&stdin_buf);
+    const stdin: *std.Io.Reader = &stdin_reader.interface;
+
+    try stdout.writeAll("Pipe REPL\nType exit to quit\n");
+    try stdout.flush();
+
+    while (true) {
+        try stdout.writeAll(">>> ");
+        try stdout.flush();
+
+        // readUntilDelimiter returns ?[]u8 — null means EOF (Ctrl+D)
+        const line = try stdin.takeDelimiter('\n') orelse break;
+
+        if (std.mem.eql(u8, line, "exit")) break;
+
+        run(line, allocator);
+    }
+}
 
 pub fn main() !void {
-    // Prints to stderr, ignoring potential errors.
-    std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
-    try pipe.bufferedPrint();
-}
+    const allocator = std.heap.page_allocator;
 
-test "simple test" {
-    const gpa = std.testing.allocator;
-    var list: std.ArrayList(i32) = .empty;
-    defer list.deinit(gpa); // Try commenting this out and see if zig detects the memory leak!
-    try list.append(gpa, 42);
-    try std.testing.expectEqual(@as(i32, 42), list.pop());
-}
-
-test "fuzz example" {
-    const Context = struct {
-        fn testOne(context: @This(), input: []const u8) anyerror!void {
-            _ = context;
-            // Try passing `--fuzz` to `zig build test` and see if it manages to fail this test case!
-            try std.testing.expect(!std.mem.eql(u8, "canyoufindme", input));
-        }
-    };
-    try std.testing.fuzz(Context{}, Context.testOne, .{});
+    const args = try std.process.argsAlloc(allocator);
+    if (args.len > 1) {
+        try runFile(args[1], allocator);
+    } else {
+        try repl(allocator);
+    }
 }
