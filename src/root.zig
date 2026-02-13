@@ -1,6 +1,7 @@
 //! By convention, root.zig is the root source file when making a library.
 const std = @import("std");
 pub const ast = @import("ast.zig");
+pub const Environment = @import("environment.zig").Environment;
 pub const Interpreter = @import("interpreter.zig").Interpreter;
 pub const Lexer = @import("lexer.zig").Lexer;
 pub const Parser = @import("parser.zig").Parser;

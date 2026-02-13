@@ -25,7 +25,14 @@ test "math operations" {
         .{ "-(3 + 2);", "-5" },
         .{ "!0;", "true" },
         .{ "!1;", "false" },
-        // TODO: add !true / !false once lexer handles boolean literals
+
+        // boolean
+        .{ "!true;", "false" },
+        .{ "!false;", "true" },
+
+        // variables
+        .{ "var a = 1; a = 5; a;", "5" },
+        .{ "var a = 1; a = a + 2; a;", "3" },
     };
 
     inline for (cases) |case| {

@@ -30,7 +30,25 @@ pub const Parser = struct {
     // NOTE: -- Declarations
 
     fn parseDeclaration(self: *Parser) !ast.Statement {
+        if (self.match(&.{.@"var"})) {
+            return try self.parseVarDeclaration();
+        }
         return try self.parseStatement();
+    }
+
+    fn parseVarDeclaration(self: *Parser) !ast.Statement {
+        const name = try self.consume(.identifier, "Expect variable name");
+
+        var initializer: ?ast.Expression = null;
+        if (self.match(&.{.equal})) {
+            initializer = try self.parseExpression();
+        }
+
+        _ = try self.consume(.semicolon, "Expect ';' after variable declaration");
+        return ast.Statement{ .var_declaration = .{
+            .name = name,
+            .initializer = initializer,
+        } };
     }
 
     // NOTE: -- Statements
@@ -48,7 +66,32 @@ pub const Parser = struct {
     // NOTE: -- Expressions
 
     fn parseExpression(self: *Parser) !ast.Expression {
-        return self.parseEquality();
+        return self.parseAssignment();
+    }
+
+    fn parseAssignment(self: *Parser) !ast.Expression {
+        const expr = try self.parseEquality();
+
+        if (self.match(&.{.equal})) {
+            const equals = self.previous();
+            const value = try self.parseAssignment();
+
+            switch (expr) {
+                .variable => {
+                    const assignment = try self.allocator.create(ast.Expression.VariableAssignment);
+                    assignment.* = .{ .token = expr.variable.token, .value = value };
+                    return ast.Expression{
+                        .var_assignment = assignment
+                    };
+                },
+                else => {
+                    self.last_error = try std.fmt.allocPrint(self.allocator, "Invalid assignment target. token: {s}", .{equals.lexeme});
+                    return error.InvalidAssignmentTarget;
+                },
+            }
+        }
+
+        return expr;
     }
 
     fn parseEquality(self: *Parser) !ast.Expression {
@@ -83,20 +126,42 @@ pub const Parser = struct {
     }
 
     fn parsePrimary(self: *Parser) !ast.Expression {
-        if (self.match(&.{TokenType.int})) {
-            const value = try std.fmt.parseFloat(f64, self.previous().lexeme);
-            return ast.Expression{
-                .literal = .{ .value = .{ .int = value } },
-            };
-        }
+        switch (self.peek().type) {
+            // Literals
+            .int => {
+                _ = self.advance();
+                const value = try std.fmt.parseFloat(f64, self.previous().lexeme);
+                return ast.Expression{ .literal = .{ .value = .{ .int = value } } };
+            },
+            .true => {
+                _ = self.advance();
+                return ast.Expression{ .literal = .{ .value = .{ .boolean = true } } };
+            },
+            .false => {
+                _ = self.advance();
+                return ast.Expression{ .literal = .{ .value = .{ .boolean = false } } };
+            },
+            .null => {
+                _ = self.advance();
+                return ast.Expression{ .literal = .{ .value = .null } };
+            },
 
-        if (self.match(&.{TokenType.lparen})) {
-            const expr = try self.parseExpression();
-            _ = try self.consume(TokenType.rparen, "Expect ')' after expression.");
-            return expr;
-        }
+            // Variables
+            .identifier => {
+                _ = self.advance();
+                return ast.Expression{ .variable = .{ .token = self.previous() } };
+            },
 
-        return error.UnexpectedToken;
+            // Grouping
+            .lparen => {
+                _ = self.advance();
+                const expr = try self.parseExpression();
+                _ = try self.consume(.rparen, "Expect ')' after expression.");
+                return expr;
+            },
+
+            else => return error.UnexpectedToken,
+        }
     }
 
     // NOTE: -- Utils

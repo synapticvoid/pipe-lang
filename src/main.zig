@@ -21,7 +21,7 @@ fn doRun(source: []const u8, allocator: std.mem.Allocator) !void {
     var parser = Parser.init(tokens, allocator);
     const statements = try parser.parse();
 
-    var interpreter = Interpreter{};
+    var interpreter = Interpreter.init(allocator);
     try interpreter.interpret(statements);
 }
 

@@ -106,7 +106,9 @@ pub const Lexer = struct {
 
             else => {
                 if (isDigit(c)) {
-                    try self.number();
+                    try self.int();
+                } else if (std.ascii.isAlphabetic(c) or c == '_') {
+                    try self.identifier();
                 } else {
                     return error.UnexpectedCharacter;
                 }
@@ -158,12 +160,12 @@ pub const Lexer = struct {
         return true;
     }
 
-    fn number(self: *Lexer) !void {
+    fn int(self: *Lexer) !void {
         while (isDigit(self.peek())) {
             _ = self.advance();
         }
 
-        // Is it a float?
+        // TODO handle float in a dedicated type
         if (self.peek() == '.' and isDigit(self.peekNext())) {
             _ = self.advance();
             while (isDigit(self.peek())) {
@@ -173,5 +175,16 @@ pub const Lexer = struct {
 
         // Here we have the full int!
         try self.addToken(.int, null);
+    }
+
+    fn identifier(self: *Lexer) !void {
+        while (std.ascii.isAlphanumeric(self.peek()) or self.peek() == '_') {
+            _ = self.advance();
+        }
+
+        const text = self.source[self.start..self.current];
+        const token_type = TokenType.keyword(text) orelse .identifier;
+
+        try self.addToken(token_type, null);
     }
 };

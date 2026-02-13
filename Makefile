@@ -9,6 +9,10 @@ build: ## Build the project
 test: ## Run tests
 	zig build test
 
+.PHONY: repl
+repl: ## Start the REPL
+	zig build run
+
 .PHONY: install
 install: build ## Install pipe to /usr/local/bin/
 	sudo cp zig-out/bin/pipe /usr/local/bin/
