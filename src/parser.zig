@@ -4,6 +4,13 @@ const ast = @import("ast.zig");
 const Token = tok.Token;
 const TokenType = tok.TokenType;
 
+const ParseError = error{
+    UnexpectedToken,
+    InvalidAssignmentTarget,
+    OutOfMemory,
+    InvalidCharacter,
+};
+
 pub const Parser = struct {
     tokens: []const Token,
     current: usize,
@@ -18,7 +25,7 @@ pub const Parser = struct {
         };
     }
 
-    pub fn parse(self: *Parser) ![]ast.Statement {
+    pub fn parse(self: *Parser) ParseError![]ast.Statement {
         var statements: std.ArrayList(ast.Statement) = .{};
 
         while (!self.isAtEnd()) {
@@ -29,14 +36,14 @@ pub const Parser = struct {
 
     // NOTE: -- Declarations
 
-    fn parseDeclaration(self: *Parser) !ast.Statement {
+    fn parseDeclaration(self: *Parser) ParseError!ast.Statement {
         if (self.match(&.{.@"var"})) {
             return try self.parseVarDeclaration();
         }
         return try self.parseStatement();
     }
 
-    fn parseVarDeclaration(self: *Parser) !ast.Statement {
+    fn parseVarDeclaration(self: *Parser) ParseError!ast.Statement {
         const name = try self.consume(.identifier, "Expect variable name");
 
         var initializer: ?ast.Expression = null;
@@ -53,11 +60,19 @@ pub const Parser = struct {
 
     // NOTE: -- Statements
 
-    fn parseStatement(self: *Parser) !ast.Statement {
+    fn parseStatement(self: *Parser) ParseError!ast.Statement {
+        if (self.check(.lbrace)) {
+            return .{ .expression = .{ .block = try self.parseBlock() } };
+        }
+
+        if (self.check(.@"if")) {
+            return .{ .expression = .{ .if_expr = try self.parseIf() } };
+        }
+
         return try self.parseExpressionStatement();
     }
 
-    fn parseExpressionStatement(self: *Parser) !ast.Statement {
+    fn parseExpressionStatement(self: *Parser) ParseError!ast.Statement {
         const expr = try self.parseExpression();
         _ = try self.consume(TokenType.semicolon, "Expect ; after expression");
         return ast.Statement{ .expression = expr };
@@ -65,11 +80,11 @@ pub const Parser = struct {
 
     // NOTE: -- Expressions
 
-    fn parseExpression(self: *Parser) !ast.Expression {
+    fn parseExpression(self: *Parser) ParseError!ast.Expression {
         return self.parseAssignment();
     }
 
-    fn parseAssignment(self: *Parser) !ast.Expression {
+    fn parseAssignment(self: *Parser) ParseError!ast.Expression {
         const expr = try self.parseEquality();
 
         if (self.match(&.{.equal})) {
@@ -80,12 +95,10 @@ pub const Parser = struct {
                 .variable => {
                     const assignment = try self.allocator.create(ast.Expression.VariableAssignment);
                     assignment.* = .{ .token = expr.variable.token, .value = value };
-                    return ast.Expression{
-                        .var_assignment = assignment
-                    };
+                    return ast.Expression{ .var_assignment = assignment };
                 },
                 else => {
-                    self.last_error = try std.fmt.allocPrint(self.allocator, "Invalid assignment target. token: {s}", .{equals.lexeme});
+                    self.last_error = std.fmt.allocPrint(self.allocator, "Invalid assignment target. token: {s}", .{equals.lexeme}) catch null;
                     return error.InvalidAssignmentTarget;
                 },
             }
@@ -94,23 +107,23 @@ pub const Parser = struct {
         return expr;
     }
 
-    fn parseEquality(self: *Parser) !ast.Expression {
+    fn parseEquality(self: *Parser) ParseError!ast.Expression {
         return self.parseBinaryLeft(parseComparison, &.{ .equal_equal, .bang_equal });
     }
 
-    fn parseComparison(self: *Parser) !ast.Expression {
+    fn parseComparison(self: *Parser) ParseError!ast.Expression {
         return self.parseBinaryLeft(parseTerm, &.{ .greater, .greater_equal, .less, .less_equal });
     }
 
-    fn parseTerm(self: *Parser) !ast.Expression {
+    fn parseTerm(self: *Parser) ParseError!ast.Expression {
         return self.parseBinaryLeft(parseFactor, &.{ .plus, .minus });
     }
 
-    fn parseFactor(self: *Parser) !ast.Expression {
+    fn parseFactor(self: *Parser) ParseError!ast.Expression {
         return self.parseBinaryLeft(parseUnary, &.{ .star, .slash });
     }
 
-    fn parseUnary(self: *Parser) !ast.Expression {
+    fn parseUnary(self: *Parser) ParseError!ast.Expression {
         if (self.match(&.{ TokenType.bang, TokenType.minus })) {
             const operator = self.previous();
             const right = try self.parseUnary();
@@ -125,7 +138,7 @@ pub const Parser = struct {
         return self.parsePrimary();
     }
 
-    fn parsePrimary(self: *Parser) !ast.Expression {
+    fn parsePrimary(self: *Parser) ParseError!ast.Expression {
         switch (self.peek().type) {
             // Literals
             .int => {
@@ -160,13 +173,56 @@ pub const Parser = struct {
                 return expr;
             },
 
+            // Control flow
+            .lbrace => {
+                return .{ .block = try self.parseBlock() };
+            },
+
+            .@"if" => {
+                return .{ .if_expr = try self.parseIf() };
+            },
+
             else => return error.UnexpectedToken,
         }
     }
 
+    fn parseBlock(self: *Parser) ParseError!*ast.Expression.Block {
+        _ = try self.consume(.lbrace, "Expect '{' at beginning of block.");
+        var statements: std.ArrayList(ast.Statement) = .{};
+
+        while (!self.check(.rbrace)) {
+            try statements.append(self.allocator, try self.parseDeclaration());
+        }
+        _ = try self.consume(.rbrace, "Expect '}' at end of block.");
+
+        const block = try self.allocator.create(ast.Expression.Block);
+        block.* = .{ .statements = statements.items };
+        return block;
+    }
+
+    fn parseIf(self: *Parser) ParseError!*ast.Expression.If {
+        _ = try self.consume(.@"if", "Expect 'if'.");
+        // Parse condition
+        _ = try self.consume(.lparen, "Expect '(' after 'if'.");
+        const condition = try self.parseExpression();
+        _ = try self.consume(.rparen, "Expect ')' after if condition.");
+
+        // Parse then branch
+        // TODO handle optional braces!
+        const then_branch = try self.parseExpression();
+        var else_branch: ?ast.Expression = null;
+        if (self.match(&.{.@"else"})) {
+            else_branch = try self.parseExpression();
+        }
+
+        const if_expr = try self.allocator.create(ast.Expression.If);
+        if_expr.* = .{ .condition = condition, .then_branch = then_branch, .else_branch = else_branch };
+        return if_expr;
+    }
+
     // NOTE: -- Utils
 
-    fn parseBinaryLeft(self: *Parser, parse_operand: *const fn (*Parser) anyerror!ast.Expression, operators: []const TokenType) !ast.Expression {
+    fn parseBinaryLeft(self: *Parser, parse_operand: *const fn (*Parser) ParseError!ast.Expression, operators: []const TokenType) ParseError!ast.Expression {
         var left = try parse_operand(self);
 
         while (self.match(operators)) {
@@ -210,7 +266,7 @@ pub const Parser = struct {
         return false;
     }
 
-    fn consume(self: *Parser, token_type: TokenType, error_message: []const u8) !Token {
+    fn consume(self: *Parser, token_type: TokenType, error_message: []const u8) ParseError!Token {
         if (self.check(token_type)) {
             return self.advance();
         }

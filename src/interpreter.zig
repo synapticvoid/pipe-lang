@@ -13,15 +13,19 @@ pub const InterpreterError = error{
     TypeError,
     UndefinedVariable,
     UnsupportedOperator,
+    VariableAlreadyDefined,
 };
 
 pub const Interpreter = struct {
-    env: Environment,
+    env: *Environment,
     allocator: std.mem.Allocator,
 
-    pub fn init(allocator: std.mem.Allocator) Interpreter {
+    pub fn init(allocator: std.mem.Allocator) !Interpreter {
+        const env = try allocator.create(Environment);
+        env.* = Environment.init(null, allocator);
+
         return .{
-            .env = Environment.init(null, allocator),
+            .env = env,
             .allocator = allocator,
         };
     }
@@ -32,16 +36,15 @@ pub const Interpreter = struct {
 
     pub fn interpret(self: *Interpreter, statements: []const ast.Statement) !void {
         for (statements) |statement| {
-            switch (statement) {
-                .var_declaration => |decl| try self.declare(decl.name, decl.initializer),
-                .expression => |expr| _ = try self.evaluate(expr),
-            }
+            try self.execute(statement);
         }
     }
 
-    pub fn declare(self: *Interpreter, token: Token, initializer: ?Expression) !void {
-        const value = if (initializer) |init_expr| try self.evaluate(init_expr) else Value.null;
-        try self.env.define(token, value);
+    pub fn execute(self: *Interpreter, statement: ast.Statement) !void {
+        switch (statement) {
+            .var_declaration => |decl| try self.declare(decl.name, decl.initializer),
+            .expression => |expr| _ = try self.evaluate(expr),
+        }
     }
 
     pub fn evaluate(self: *Interpreter, expr: ast.Expression) InterpreterError!Value {
@@ -88,13 +91,61 @@ pub const Interpreter = struct {
                     else => return InterpreterError.UnsupportedOperator,
                 }
             },
+
+            // Control flow
+            .block => |e| {
+                const env = try self.allocator.create(Environment);
+                env.* = Environment.init(self.env, self.allocator);
+                return try self.evaluateBlock(e, env);
+            },
+
+            .if_expr => |e| {
+                const cond = try self.evaluate(e.condition);
+                if (isTruthy(cond)) {
+                    return try self.evaluate(e.then_branch);
+                } else if (e.else_branch) |else_expr| {
+                    return try self.evaluate(else_expr);
+                }
+                return Value.unit;
+            },
         }
+    }
+
+    fn evaluateBlock(self: *Interpreter, block: *ast.Expression.Block, env: *Environment) !ast.Value {
+        const previous = self.env;
+        self.env = env;
+        defer self.env = previous;
+
+        if (block.statements.len == 0) {
+            return Value.unit;
+        }
+
+        // Execute all statements except the last one
+        for (block.statements[0 .. block.statements.len - 1]) |statement| {
+            try self.execute(statement);
+        }
+
+        // We have to extract the value of the last statement
+        const last = block.statements[block.statements.len - 1];
+        return switch (last) {
+            .expression => |expr| try self.evaluate(expr),
+            else => {
+                try self.execute(last);
+                return Value.unit;
+            },
+        };
+    }
+
+    pub fn declare(self: *Interpreter, token: Token, initializer: ?Expression) !void {
+        const value = if (initializer) |init_expr| try self.evaluate(init_expr) else Value.null;
+        try self.env.define(token, value);
     }
 };
 
 fn isTruthy(value: Value) bool {
     return switch (value) {
         .null => false,
+        .unit => false,
         .boolean => value.boolean,
         .int => value.int != 0,
         .string => value.string.len > 0,

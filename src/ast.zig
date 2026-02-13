@@ -25,7 +25,14 @@ pub const Expression = union(enum) {
 
     // Operations
     unary: *Unary,
-    binary: *Binary, // * to break the cycle of a recursive definition
+    binary: *Binary,
+
+
+    // Control flow
+    if_expr: *If,
+    block: *Block,
+
+    // -------------------------------------------------------------------
 
     // Literals
     pub const Literal = struct {
@@ -40,6 +47,18 @@ pub const Expression = union(enum) {
     pub const VariableAssignment = struct {
         token: Token,
         value: Expression,
+    };
+
+
+    // Control flow
+    pub const If = struct {
+        condition: Expression,
+        then_branch: Expression,
+        else_branch: ?Expression,
+    };
+
+    pub const Block = struct {
+        statements: []const Statement,
     };
 
     // Operations
@@ -60,6 +79,7 @@ pub const Value = union(enum) {
     string: []const u8,
     boolean: bool,
     null,
+    unit,
 
     pub fn asInt(self: Value) !f64 {
         switch (self) {
@@ -74,6 +94,7 @@ pub const Value = union(enum) {
             .string => |s| try writer.print("\"{s}\"", .{s}),
             .boolean => |b| try writer.print("{any}", .{b}),
             .null => try writer.writeAll("null"),
+            .unit => try writer.writeAll("unit"),
         }
     }
 };

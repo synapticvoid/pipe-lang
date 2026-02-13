@@ -16,7 +16,7 @@ pub fn evaluate(source: []const u8, allocator: std.mem.Allocator) !pipe.ast.Valu
     const tokens = try tokenize(source, allocator);
     var parser = pipe.Parser.init(tokens, allocator);
     const statements = try parser.parse();
-    var interpreter = pipe.Interpreter.init(allocator);
+    var interpreter = try pipe.Interpreter.init(allocator);
     defer interpreter.deinit();
     var result: pipe.ast.Value = .null;
     for (statements) |statement| {
