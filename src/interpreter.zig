@@ -3,7 +3,7 @@ const ast = @import("ast.zig");
 const tokens = @import("tokens.zig");
 
 const Environment = @import("environment.zig").Environment;
-const PipeFunction = @import("callable.zig").PipeFunction;
+const Callable = @import("callable.zig").Callable;
 const Expression = ast.Expression;
 const Value = ast.Value;
 const Token = tokens.Token;
@@ -54,10 +54,10 @@ pub const Interpreter = struct {
             .literal => |e| return e.value,
 
             // Variables
-            .variable => |e| return self.env.get(e.token),
+            .variable => |e| return self.env.get(e.token.lexeme),
             .var_assignment => |e| {
                 const value = try self.evaluate(e.value);
-                try self.env.assign(e.token, value);
+                try self.env.assign(e.token.lexeme, value);
                 return value;
             },
 
@@ -115,8 +115,15 @@ pub const Interpreter = struct {
             .fn_call => |e| {
                 const function = try self.evaluate(e.callee);
                 switch (function) {
-                    .function => |fn_decl| {
-                        return try self.callFunction(fn_decl, e.args);
+                    .function => |callable| switch (callable) {
+                        .user => |user_fn| return try self.callFunction(user_fn, e.args),
+                        .builtin => |builtin_fn| {
+                            var args: std.ArrayList(Value) = .{};
+                            for (e.args) |arg| {
+                                try args.append(self.allocator, try self.evaluate(arg));
+                            }
+                            return builtin_fn.func(args.items);
+                        },
                     },
                     else => return InterpreterError.TypeError,
                 }
@@ -151,21 +158,21 @@ pub const Interpreter = struct {
 
     pub fn declareVar(self: *Interpreter, var_expr: ast.Statement.VarDeclaration) !void {
         const value = if (var_expr.initializer) |init_expr| try self.evaluate(init_expr) else Value.null;
-        try self.env.define(var_expr.name, value);
+        try self.env.define(var_expr.name.lexeme, value);
     }
 
     pub fn declareFn(self: *Interpreter, fn_expr: ast.Statement.FnDeclaration) !void {
-        const fn_decl = PipeFunction{ .closure = self.env, .declaration = fn_expr };
-        try self.env.define(fn_expr.name, .{ .function = fn_decl });
+        const user_fn = Callable.UserFn{ .closure = self.env, .declaration = fn_expr };
+        try self.env.define(fn_expr.name.lexeme, .{ .function = .{ .user = user_fn } });
     }
 
-    pub fn callFunction(self: *Interpreter, function: PipeFunction, args: []const Expression) !Value {
+    pub fn callFunction(self: *Interpreter, function: Callable.UserFn, args: []const Expression) !Value {
         // Create environment with params
         const env = try self.allocator.create(Environment);
         env.* = Environment.init(function.closure, self.allocator);
         for (args, function.declaration.params) |arg, param| {
             const value = try self.evaluate(arg);
-            try env.define(param, value);
+            try env.define(param.lexeme, value);
         }
 
         // Execute function's body

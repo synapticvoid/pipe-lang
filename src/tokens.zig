@@ -58,7 +58,6 @@ pub const TokenType = enum {
         .{ "if", .@"if" },
         .{ "null", .null },
         .{ "or", .@"or" },
-        .{ "print", .print },
         .{ "return", .@"return" },
         .{ "true", .true },
         .{ "var", .@"var" },

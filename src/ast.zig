@@ -1,6 +1,6 @@
 const std = @import("std");
 const tokens = @import("tokens.zig");
-const PipeFunction = @import("callable.zig").PipeFunction;
+const Callable = @import("callable.zig").Callable;
 const Token = tokens.Token;
 
 pub const Statement = union(enum) {
@@ -94,7 +94,7 @@ pub const Value = union(enum) {
     int: f64,
     string: []const u8,
     boolean: bool,
-    function: PipeFunction,
+    function: Callable,
     null,
     unit,
 
@@ -110,7 +110,10 @@ pub const Value = union(enum) {
             .int => |n| try writer.print("{d}", .{n}),
             .string => |s| try writer.print("\"{s}\"", .{s}),
             .boolean => |b| try writer.print("{any}", .{b}),
-            .function => |f| try writer.print("fn<{s}>", .{f.declaration.name.lexeme}),
+            .function => |f| switch (f) {
+                .user => |u| try writer.print("fn<{s}>", .{u.declaration.name.lexeme}),
+                .builtin => |b| try writer.print("fn<{s}>", .{b.name}),
+            },
             .null => try writer.writeAll("null"),
             .unit => try writer.writeAll("unit"),
         }
