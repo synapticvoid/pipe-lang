@@ -1,5 +1,6 @@
 const std = @import("std");
 const tokens = @import("tokens.zig");
+const PipeFunction = @import("callable.zig").PipeFunction;
 const Token = tokens.Token;
 
 pub const Statement = union(enum) {
@@ -8,10 +9,17 @@ pub const Statement = union(enum) {
 
     // Declarations
     var_declaration: VarDeclaration,
+    fn_declaration: FnDeclaration,
 
     pub const VarDeclaration = struct {
         name: Token,
         initializer: ?Expression,
+    };
+
+    pub const FnDeclaration = struct {
+        name: Token,
+        params: []const Token,
+        body: []const Statement,
     };
 };
 
@@ -22,6 +30,9 @@ pub const Expression = union(enum) {
     // Variables
     variable: Variable,
     var_assignment: *VariableAssignment,
+
+    // Functions
+    fn_call: *FnCall,
 
     // Operations
     unary: *Unary,
@@ -49,6 +60,11 @@ pub const Expression = union(enum) {
         value: Expression,
     };
 
+    // Functions
+    pub const FnCall = struct {
+        callee: Expression,
+        args: []const Expression,
+    };
 
     // Control flow
     pub const If = struct {
@@ -78,6 +94,7 @@ pub const Value = union(enum) {
     int: f64,
     string: []const u8,
     boolean: bool,
+    function: PipeFunction,
     null,
     unit,
 
@@ -93,6 +110,7 @@ pub const Value = union(enum) {
             .int => |n| try writer.print("{d}", .{n}),
             .string => |s| try writer.print("\"{s}\"", .{s}),
             .boolean => |b| try writer.print("{any}", .{b}),
+            .function => |f| try writer.print("fn<{s}>", .{f.declaration.name.lexeme}),
             .null => try writer.writeAll("null"),
             .unit => try writer.writeAll("unit"),
         }

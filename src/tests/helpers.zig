@@ -22,7 +22,14 @@ pub fn evaluate(source: []const u8, allocator: std.mem.Allocator) !pipe.ast.Valu
     for (statements) |statement| {
         switch (statement) {
             .expression => |expr| result = try interpreter.evaluate(expr),
-            .var_declaration => |decl| try interpreter.declare(decl.name, decl.initializer),
+            .var_declaration => |decl| {
+                try interpreter.declareVar(decl);
+                result = .unit;
+            },
+            .fn_declaration => |decl| {
+                try interpreter.declareFn(decl);
+                result = .null;
+            },
         }
     }
     return result;

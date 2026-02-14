@@ -3,6 +3,7 @@ const ast = @import("ast.zig");
 const tokens = @import("tokens.zig");
 
 const Environment = @import("environment.zig").Environment;
+const PipeFunction = @import("callable.zig").PipeFunction;
 const Expression = ast.Expression;
 const Value = ast.Value;
 const Token = tokens.Token;
@@ -42,7 +43,8 @@ pub const Interpreter = struct {
 
     pub fn execute(self: *Interpreter, statement: ast.Statement) !void {
         switch (statement) {
-            .var_declaration => |decl| try self.declare(decl.name, decl.initializer),
+            .var_declaration => |decl| try self.declareVar(decl),
+            .fn_declaration => |decl| try self.declareFn(decl),
             .expression => |expr| _ = try self.evaluate(expr),
         }
     }
@@ -96,7 +98,7 @@ pub const Interpreter = struct {
             .block => |e| {
                 const env = try self.allocator.create(Environment);
                 env.* = Environment.init(self.env, self.allocator);
-                return try self.evaluateBlock(e, env);
+                return try self.evaluateBlock(e.statements, env);
             },
 
             .if_expr => |e| {
@@ -108,25 +110,36 @@ pub const Interpreter = struct {
                 }
                 return Value.unit;
             },
+
+            // Functions
+            .fn_call => |e| {
+                const function = try self.evaluate(e.callee);
+                switch (function) {
+                    .function => |fn_decl| {
+                        return try self.callFunction(fn_decl, e.args);
+                    },
+                    else => return InterpreterError.TypeError,
+                }
+            },
         }
     }
 
-    fn evaluateBlock(self: *Interpreter, block: *ast.Expression.Block, env: *Environment) !ast.Value {
+    fn evaluateBlock(self: *Interpreter, statements: []const ast.Statement, env: *Environment) !ast.Value {
         const previous = self.env;
         self.env = env;
         defer self.env = previous;
 
-        if (block.statements.len == 0) {
+        if (statements.len == 0) {
             return Value.unit;
         }
 
         // Execute all statements except the last one
-        for (block.statements[0 .. block.statements.len - 1]) |statement| {
+        for (statements[0 .. statements.len - 1]) |statement| {
             try self.execute(statement);
         }
 
         // We have to extract the value of the last statement
-        const last = block.statements[block.statements.len - 1];
+        const last = statements[statements.len - 1];
         return switch (last) {
             .expression => |expr| try self.evaluate(expr),
             else => {
@@ -136,9 +149,28 @@ pub const Interpreter = struct {
         };
     }
 
-    pub fn declare(self: *Interpreter, token: Token, initializer: ?Expression) !void {
-        const value = if (initializer) |init_expr| try self.evaluate(init_expr) else Value.null;
-        try self.env.define(token, value);
+    pub fn declareVar(self: *Interpreter, var_expr: ast.Statement.VarDeclaration) !void {
+        const value = if (var_expr.initializer) |init_expr| try self.evaluate(init_expr) else Value.null;
+        try self.env.define(var_expr.name, value);
+    }
+
+    pub fn declareFn(self: *Interpreter, fn_expr: ast.Statement.FnDeclaration) !void {
+        const fn_decl = PipeFunction{ .closure = self.env, .declaration = fn_expr };
+        try self.env.define(fn_expr.name, .{ .function = fn_decl });
+    }
+
+    pub fn callFunction(self: *Interpreter, function: PipeFunction, args: []const Expression) !Value {
+        // Create environment with params
+        const env = try self.allocator.create(Environment);
+        env.* = Environment.init(function.closure, self.allocator);
+        for (args, function.declaration.params) |arg, param| {
+            const value = try self.evaluate(arg);
+            try env.define(param, value);
+        }
+
+        // Execute function's body
+        return try self.evaluateBlock(function.declaration.body, env);
+
     }
 };
 
@@ -148,6 +180,7 @@ fn isTruthy(value: Value) bool {
         .unit => false,
         .boolean => value.boolean,
         .int => value.int != 0,
+        .function => true,
         .string => value.string.len > 0,
     };
 }

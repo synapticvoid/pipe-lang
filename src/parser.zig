@@ -38,12 +38,17 @@ pub const Parser = struct {
 
     fn parseDeclaration(self: *Parser) ParseError!ast.Statement {
         if (self.match(&.{.@"var"})) {
-            return try self.parseVarDeclaration();
+            return .{ .var_declaration = try self.parseVarDeclaration() };
         }
+
+        if (self.match(&.{.@"fn"})) {
+            return .{ .fn_declaration = try self.parseFnDeclaration() };
+        }
+
         return try self.parseStatement();
     }
 
-    fn parseVarDeclaration(self: *Parser) ParseError!ast.Statement {
+    fn parseVarDeclaration(self: *Parser) ParseError!ast.Statement.VarDeclaration {
         const name = try self.consume(.identifier, "Expect variable name");
 
         var initializer: ?ast.Expression = null;
@@ -52,10 +57,39 @@ pub const Parser = struct {
         }
 
         _ = try self.consume(.semicolon, "Expect ';' after variable declaration");
-        return ast.Statement{ .var_declaration = .{
+        return .{
             .name = name,
             .initializer = initializer,
-        } };
+        };
+    }
+
+    fn parseFnDeclaration(self: *Parser) ParseError!ast.Statement.FnDeclaration {
+        const name = try self.consume(.identifier, "Expect function name.");
+        _ = try self.consume(.lparen, "Expect '(' after function name.");
+
+        // Parse parameters
+        var params: std.ArrayList(Token) = .{};
+        if (!self.check(.rparen)) {
+            try params.append(self.allocator, try self.consume(.identifier, "Expect parameter name"));
+            while (self.match(&.{.comma})) {
+                try params.append(self.allocator, try self.consume(.identifier, "Expect parameter name"));
+            }
+        }
+        _ = try self.consume(.rparen, "Expect ')' after parameters.");
+        _ = try self.consume(.lbrace, "Expect '{' before function body.");
+
+        // Parse body
+        var body: std.ArrayList(ast.Statement) = .{};
+        while (!self.check(.rbrace)) {
+            try body.append(self.allocator, try self.parseDeclaration());
+        }
+        _ = try self.consume(.rbrace, "Expect '}' after function body.");
+
+        return .{
+            .name = name,
+            .params = params.items,
+            .body = body.items,
+        };
     }
 
     // NOTE: -- Statements
@@ -69,13 +103,13 @@ pub const Parser = struct {
             return .{ .expression = .{ .if_expr = try self.parseIf() } };
         }
 
-        return try self.parseExpressionStatement();
+        return .{ .expression = try self.parseExpressionStatement() };
     }
 
-    fn parseExpressionStatement(self: *Parser) ParseError!ast.Statement {
+    fn parseExpressionStatement(self: *Parser) ParseError!ast.Expression {
         const expr = try self.parseExpression();
         _ = try self.consume(TokenType.semicolon, "Expect ; after expression");
-        return ast.Statement{ .expression = expr };
+        return expr;
     }
 
     // NOTE: -- Expressions
@@ -135,7 +169,28 @@ pub const Parser = struct {
 
             return .{ .unary = unary };
         }
-        return self.parsePrimary();
+        return self.parseCall();
+    }
+
+    fn parseCall(self: *Parser) ParseError!ast.Expression {
+        var expr = try self.parsePrimary();
+
+        while (self.match(&.{.lparen})) {
+            var args: std.ArrayList(ast.Expression) = .{};
+            if (!self.check(.rparen)) {
+                try args.append(self.allocator, try self.parseExpression());
+                while (self.match(&.{.comma})) {
+                    try args.append(self.allocator, try self.parseExpression());
+                }
+            }
+            _ = try self.consume(.rparen, "Expect ')' after arguments.");
+
+            const fn_call = try self.allocator.create(ast.Expression.FnCall);
+            fn_call.* = .{ .callee = expr, .args = args.items };
+            expr = .{ .fn_call = fn_call };
+        }
+
+        return expr;
     }
 
     fn parsePrimary(self: *Parser) ParseError!ast.Expression {

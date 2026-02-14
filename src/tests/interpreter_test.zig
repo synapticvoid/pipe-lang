@@ -65,3 +65,17 @@ test "if expressions" {
         .{ "var a = if (false) { 5; } else { -5; }; a;", "-5" },
     });
 }
+
+test "function declaration and call" {
+    try expectEval(.{
+        .{ "fn add(a, b) { a + b; } add(1, 2);", "3" },
+        .{ "fn double(x) { x * 2; } double(5);", "10" },
+        .{ "fn greet() { 42; } greet();", "42" },
+    });
+}
+
+test "function with closure" {
+    try expectEval(.{
+        .{ "var x = 10; fn addX(a) { a + x; } addX(5);", "15" },
+    });
+}
