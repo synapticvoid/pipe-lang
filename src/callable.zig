@@ -1,5 +1,6 @@
 const ast = @import("ast.zig");
 const Environment = @import("environment.zig").Environment;
+const RuntimeContext = @import("runtime.zig").RuntimeContext;
 
 pub const Callable = union(enum) {
     user: UserFn,
@@ -11,8 +12,10 @@ pub const Callable = union(enum) {
     };
 
     pub const BuiltinFn = struct {
+        pub const Func = *const fn (args: []const ast.Value, ctx: RuntimeContext) ast.Value;
+
         name: []const u8,
-        func: *const fn(args: []const ast.Value) ast.Value,
+        func: Func,
     };
 };
 

@@ -7,8 +7,9 @@ fn expectEval(cases: anytype) !void {
 
     inline for (cases) |case| {
         var buf: [64]u8 = undefined;
-        const result = try helpers.evaluate(case[0], arena.allocator());
-        const actual = try std.fmt.bufPrint(&buf, "{f}", .{result});
+        var eval = try helpers.evaluate(case[0], arena.allocator());
+        defer eval.deinit();
+        const actual = try std.fmt.bufPrint(&buf, "{f}", .{eval.value});
         try std.testing.expectEqualStrings(case[1], actual);
     }
 }
@@ -71,6 +72,26 @@ test "function declaration and call" {
         .{ "fn add(a, b) { a + b; } add(1, 2);", "3" },
         .{ "fn double(x) { x * 2; } double(5);", "10" },
         .{ "fn greet() { 42; } greet();", "42" },
+    });
+}
+
+fn expectOutput(cases: anytype) !void {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    inline for (cases) |case| {
+        var eval = try helpers.evaluate(case[0], arena.allocator());
+        defer eval.deinit();
+        try std.testing.expectEqualStrings(case[1], eval.output);
+    }
+}
+
+test "print" {
+    try expectOutput(.{
+        .{ "print(42);", "42\n" },
+        .{ "print(\"hello\");", "hello\n" },
+        .{ "print(1, 2, 3);", "1 2 3\n" },
+        .{ "print(\"hello\", \"world\");", "hello world\n" },
     });
 }
 

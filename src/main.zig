@@ -2,39 +2,39 @@ const std = @import("std");
 const Lexer = @import("lexer.zig").Lexer;
 const Parser = @import("parser.zig").Parser;
 const Interpreter = @import("interpreter.zig").Interpreter;
+const RuntimeContext = @import("runtime.zig").RuntimeContext;
 
 const max_file_size = 10 * 1024 * 1024;  // 10MB, should be plenty enough
 const max_input_size = 1024 * 1024;  // 1MB, should be plenty enough
 
-fn run(source: []const u8, allocator: std.mem.Allocator) void {
+fn run(source: []const u8, ctx: RuntimeContext, allocator: std.mem.Allocator) void {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    doRun(source, arena.allocator()) catch |err| {
+    doRun(source, ctx, arena.allocator()) catch |err| {
         std.debug.print("Error: {}\n", .{err});
     };
 }
-fn doRun(source: []const u8, allocator: std.mem.Allocator) !void {
+fn doRun(source: []const u8, ctx: RuntimeContext, allocator: std.mem.Allocator) !void {
     var lexer = Lexer.init(source, allocator);
     const tokens = try lexer.tokenize();
 
     var parser = Parser.init(tokens, allocator);
     const statements = try parser.parse();
 
-    var interpreter = try Interpreter.init(allocator);
+    var interpreter = try Interpreter.init(ctx, allocator);
     try interpreter.interpret(statements);
+    try ctx.writer.flush();
 }
 
-fn runFile(path: []const u8, allocator: std.mem.Allocator) !void {
+fn runFile(path: []const u8, ctx: RuntimeContext, allocator: std.mem.Allocator) !void {
     const source = try std.fs.cwd().readFileAlloc(allocator, path, max_file_size);
     defer allocator.free(source);
-    run(source, allocator);
+    run(source, ctx, allocator);
 }
 
-fn repl(allocator: std.mem.Allocator) !void {
-    var stdout_buf: [4096]u8 = undefined;
-    var stdout_writer = std.fs.File.stdout().writer(&stdout_buf);
-    const stdout: *std.Io.Writer = &stdout_writer.interface;
+fn repl(ctx: RuntimeContext, allocator: std.mem.Allocator) !void {
+    const stdout = ctx.writer;
 
     var stdin_buf: [max_input_size]u8 = undefined;
     var stdin_reader = std.fs.File.stdin().reader(&stdin_buf);
@@ -52,17 +52,21 @@ fn repl(allocator: std.mem.Allocator) !void {
 
         if (std.mem.eql(u8, line, "exit")) break;
 
-        run(line, allocator);
+        run(line, ctx, allocator);
     }
 }
 
 pub fn main() !void {
     const allocator = std.heap.page_allocator;
 
+    var stdout_buf: [4096]u8 = undefined;
+    var stdout_writer = std.fs.File.stdout().writer(&stdout_buf);
+    const ctx = RuntimeContext{ .writer = &stdout_writer.interface };
+
     const args = try std.process.argsAlloc(allocator);
     if (args.len > 1) {
-        try runFile(args[1], allocator);
+        try runFile(args[1], ctx, allocator);
     } else {
-        try repl(allocator);
+        try repl(ctx, allocator);
     }
 }

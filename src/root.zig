@@ -5,6 +5,7 @@ pub const Environment = @import("environment.zig").Environment;
 pub const Interpreter = @import("interpreter.zig").Interpreter;
 pub const Lexer = @import("lexer.zig").Lexer;
 pub const Parser = @import("parser.zig").Parser;
+pub const RuntimeContext = @import("runtime.zig").RuntimeContext;
 pub const Token = @import("tokens.zig").Token;
 
 pub fn bufferedPrint() !void {

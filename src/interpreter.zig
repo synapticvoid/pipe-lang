@@ -1,7 +1,9 @@
 const std = @import("std");
 const ast = @import("ast.zig");
+const builtins = @import("builtins.zig");
 const tokens = @import("tokens.zig");
 
+const RuntimeContext = @import("runtime.zig").RuntimeContext;
 const Environment = @import("environment.zig").Environment;
 const Callable = @import("callable.zig").Callable;
 const Expression = ast.Expression;
@@ -19,14 +21,17 @@ pub const InterpreterError = error{
 
 pub const Interpreter = struct {
     env: *Environment,
+    ctx: RuntimeContext,
     allocator: std.mem.Allocator,
 
-    pub fn init(allocator: std.mem.Allocator) !Interpreter {
+    pub fn init(ctx: RuntimeContext, allocator: std.mem.Allocator) !Interpreter {
         const env = try allocator.create(Environment);
         env.* = Environment.init(null, allocator);
+        try builtins.registerAll(env);
 
         return .{
             .env = env,
+            .ctx = ctx,
             .allocator = allocator,
         };
     }
@@ -122,7 +127,7 @@ pub const Interpreter = struct {
                             for (e.args) |arg| {
                                 try args.append(self.allocator, try self.evaluate(arg));
                             }
-                            return builtin_fn.func(args.items);
+                            return builtin_fn.func(args.items, self.ctx);
                         },
                     },
                     else => return InterpreterError.TypeError,

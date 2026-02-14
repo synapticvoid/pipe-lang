@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(zig build:*)",
-      "Bash(make test:*)"
+      "Bash(make test:*)",
+      "Bash(make build:*)"
     ]
   }
 }
