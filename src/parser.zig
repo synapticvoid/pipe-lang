@@ -201,6 +201,10 @@ pub const Parser = struct {
                 const value = try std.fmt.parseFloat(f64, self.previous().lexeme);
                 return ast.Expression{ .literal = .{ .value = .{ .int = value } } };
             },
+            .string => {
+                _ = self.advance();
+                return ast.Expression{ .literal = .{ .value = .{ .string = self.previous().lexeme } } };
+            },
             .true => {
                 _ = self.advance();
                 return ast.Expression{ .literal = .{ .value = .{ .boolean = true } } };

@@ -105,6 +105,8 @@ pub const Lexer = struct {
             ' ', '\r', '\t' => {},
             '\n' => self.line += 1,
 
+            '"' => try self.string(),
+
             else => {
                 if (isDigit(c)) {
                     try self.int();
@@ -176,6 +178,27 @@ pub const Lexer = struct {
 
         // Here we have the full int!
         try self.addToken(.int, null);
+    }
+
+    fn string(self: *Lexer) !void {
+        // Continue until we reach the end of string
+        while (self.peek() != '"' and !self.isAtEnd()) {
+            if (self.peek() == '\n') {
+                self.line += 1;
+            }
+            _ = self.advance();
+        }
+
+        if (self.isAtEnd()) {
+            return error.UnexpectedCharacter;
+        }
+
+        // Closing "
+        _ = self.advance();
+
+        // Strip surround ", we only want the string value
+        const value = self.source[self.start + 1 .. self.current - 1];
+        try self.addToken(.string, value);
     }
 
     fn identifier(self: *Lexer) !void {
