@@ -12,7 +12,9 @@ const VariableInfo = struct {
 const TypeCheckError = error{
     TypeMismatch,
     UndefinedVariable,
+    UndefinedType,
     ConstReassignment,
+    OutOfMemory,
 };
 
 const TypeEnvironment = struct {
@@ -47,25 +49,74 @@ pub const TypeChecker = struct {
     env: *TypeEnvironment,
     allocator: std.mem.Allocator,
 
-    pub fn check(self: *TypeChecker, statements: []const ast.Statement) !void {
+    pub fn init(allocator: std.mem.Allocator) !TypeChecker {
+        const env = try allocator.create(TypeEnvironment);
+        env.* = TypeEnvironment.init(null, allocator);
+        return .{ .env = env, .allocator = allocator };
+    }
+
+    pub fn check(self: *TypeChecker, statements: []const ast.Statement) TypeCheckError!void {
         for (statements) |statement| {
             switch (statement) {
                 .expression => |expr| _ = try self.checkExpression(expr),
                 .var_declaration => |decl| try self.checkVarDeclaration(decl),
-                .fn_declaration => |decl| {},
+                .fn_declaration => |decl| try self.checkFunctionDeclaration(decl),
             }
         }
     }
 
-    fn checkExpression(self: *TypeChecker, expr: ast.Expression) !PipeType {
+    fn checkExpression(self: *TypeChecker, expr: ast.Expression) TypeCheckError!PipeType {
         return switch (expr) {
             .unary => |u| self.checkUnary(u),
             .binary => |u| self.checkBinary(u),
             .literal => |lit| self.checkLiteral(lit),
             .variable => |v| self.checkVariable(v),
+            .if_expr => |if_expr| self.checkIf(if_expr),
             .var_assignment => |assign| self.checkAssignment(assign),
             else => error.TypeMismatch,
         };
+    }
+
+    fn checkIf(self: *TypeChecker, if_expr: *ast.Expression.If) !PipeType {
+        const condition_type = try self.checkExpression(if_expr.condition);
+        if (condition_type != .bool) {
+            return error.TypeMismatch;
+        }
+
+        const then_type = try self.checkExpression(if_expr.then_branch);
+        // If else expression exists, its type must match with then
+        if (if_expr.else_branch) |else_branch| {
+            const else_type = try self.checkExpression(else_branch);
+            if (then_type != else_type) {
+                return error.TypeMismatch;
+            }
+            return then_type;
+        }
+
+        return PipeType.unit;
+    }
+
+    fn checkFunctionDeclaration(self: *TypeChecker, decl: ast.Statement.FnDeclaration) !void {
+        var env = try self.allocator.create(TypeEnvironment);
+        env.* = TypeEnvironment.init(self.env, self.allocator);
+
+        // Resolve type for each param
+        for (decl.params) |param| {
+            try env.define(param.name.lexeme, .{
+                .pipe_type = try resolveTypeName(param.type_annotation.lexeme),
+                .mutability = .mutable,
+            });
+        }
+
+        // Swap current env for type checking
+        const previous = self.env;
+        self.env = env;
+        defer self.env = previous;
+
+        // Type check body statements
+        try self.check(decl.body);
+
+        // TODO: check return type
     }
 
     fn checkUnary(self: *TypeChecker, unary: *ast.Expression.Unary) !PipeType {
@@ -142,7 +193,7 @@ pub const TypeChecker = struct {
         });
     }
 
-    fn checkLiteral(self: *TypeChecker, literal: ast.Expression.Literal) !PipeType {
+    fn checkLiteral(_: *TypeChecker, literal: ast.Expression.Literal) !PipeType {
         return switch (literal.value) {
             .boolean => PipeType.bool,
             .int => PipeType.int,

@@ -25,12 +25,22 @@ Pipeline: **Source → Lexer → Parser → AST → `Type Checker` → Interpret
 - [x] Var declarations: validate annotation vs initializer, or infer
 - [x] Assignments: check value matches variable's type
 - [x] Const enforcement: reject reassignment
-- [ ] If expressions: both branches must produce the same type
-- [ ] Functions: type-check body, validate return type
+- [x] If expressions: both branches must produce the same type
+- [x] Functions: type-check body, validate return type (return type validation TODO)
+
+## Step 4b — Function calls & `Any` type
+- [ ] Add `any` variant to `PipeType`
+- [ ] Add `compatible(other)` method to `PipeType` (returns true if either is `any` or both are equal)
+- [ ] Replace `==` type comparisons with `compatible()` in type checker
+- [ ] Store function signatures in `TypeEnvironment` (param types + return type)
+- [ ] Register built-in functions (`print(Any) → Unit`) in root environment
+- [ ] `checkFnCall`: validate arg count, check each arg type against param type
+- [ ] `checkFnCall`: return the function's declared return type
+- [ ] Validate return type in `checkFunctionDeclaration`
 
 ## Step 5 — Wire into `main.zig`
-- [ ] Run type checker between parser and interpreter
-- [ ] Type errors stop execution before interpretation
+- [x] Run type checker between parser and interpreter
+- [x] Type errors stop execution before interpretation
 
 ## Step 6 — Improve error reporting
 - [ ] Include line numbers in type error messages

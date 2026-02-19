@@ -1,11 +1,12 @@
 const std = @import("std");
 const Lexer = @import("lexer.zig").Lexer;
 const Parser = @import("parser.zig").Parser;
+const TypeChecker = @import("type_checker.zig").TypeChecker;
 const Interpreter = @import("interpreter.zig").Interpreter;
 const RuntimeContext = @import("runtime.zig").RuntimeContext;
 
-const max_file_size = 10 * 1024 * 1024;  // 10MB, should be plenty enough
-const max_input_size = 1024 * 1024;  // 1MB, should be plenty enough
+const max_file_size = 10 * 1024 * 1024; // 10MB, should be plenty enough
+const max_input_size = 1024 * 1024; // 1MB, should be plenty enough
 
 fn run(source: []const u8, ctx: RuntimeContext, allocator: std.mem.Allocator) void {
     var arena = std.heap.ArenaAllocator.init(allocator);
@@ -21,6 +22,9 @@ fn doRun(source: []const u8, ctx: RuntimeContext, allocator: std.mem.Allocator) 
 
     var parser = Parser.init(tokens, allocator);
     const statements = try parser.parse();
+
+    var type_checker = try TypeChecker.init(allocator);
+    try type_checker.check(statements);
 
     var interpreter = try Interpreter.init(ctx, allocator);
     try interpreter.interpret(statements);
