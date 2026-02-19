@@ -6,6 +6,7 @@ pub const TokenType = enum {
     rparen,
     lbrace,
     rbrace,
+    colon,
     semicolon,
     comma,
     minus,
@@ -30,8 +31,9 @@ pub const TokenType = enum {
 
     // Keywords
     @"and",
+    @"const",
     @"else",
-    @"false",
+    false,
     @"fn",
     @"for",
     @"if",
@@ -51,8 +53,9 @@ pub const TokenType = enum {
 
     const keywords = std.StaticStringMap(TokenType).initComptime(.{
         .{ "and", .@"and" },
+        .{ "const", .@"const" },
         .{ "else", .@"else" },
-        .{ "false", .@"false" },
+        .{ "false", .false },
         .{ "fn", .@"fn" },
         .{ "for", .@"for" },
         .{ "if", .@"if" },

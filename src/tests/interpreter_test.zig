@@ -47,7 +47,8 @@ test "unary" {
 
 test "variables" {
     try expectEval(.{
-        .{ "var a = 1; a = 5; a;", "5" },
+        .{ "var a: Int = 1; a = 5; a;", "5" },
+        .{ "var a = 1; a = 5; a;", "5" }, // Type inference
         .{ "var a = 1; a = a + 2; a;", "3" },
     });
 }
@@ -69,9 +70,9 @@ test "if expressions" {
 
 test "function declaration and call" {
     try expectEval(.{
-        .{ "fn add(a, b) { a + b; } add(1, 2);", "3" },
-        .{ "fn double(x) { x * 2; } double(5);", "10" },
-        .{ "fn greet() { 42; } greet();", "42" },
+        .{ "fn add(a: Int, b: Int) Int { a + b; } add(1, 2);", "3" },
+        .{ "fn double(x: Int) Int { x * 2; } double(5);", "10" },
+        .{ "fn greet() Int { 42; } greet();", "42" },
     });
 }
 
@@ -97,6 +98,6 @@ test "print" {
 
 test "function with closure" {
     try expectEval(.{
-        .{ "var x = 10; fn addX(a) { a + x; } addX(5);", "15" },
+        .{ "var x = 10; fn addX(a: Int) Int { a + x; } addX(5);", "15" },
     });
 }

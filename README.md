@@ -2,6 +2,8 @@ Using zig 0.15.2.
 
 ## Syntax
 ```zig
+// All types are in PascalCase
+// Int, Float, Bool, String, etc
 // Variable declaration
 var a: Int = 1;
 

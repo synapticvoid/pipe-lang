@@ -38,7 +38,10 @@ pub const Parser = struct {
 
     fn parseDeclaration(self: *Parser) ParseError!ast.Statement {
         if (self.match(&.{.@"var"})) {
-            return .{ .var_declaration = try self.parseVarDeclaration() };
+            return .{ .var_declaration = try self.parseVarDeclaration(ast.Mutability.mutable) };
+        }
+        if (self.match(&.{.@"const"})) {
+            return .{ .var_declaration = try self.parseVarDeclaration(ast.Mutability.constant) };
         }
 
         if (self.match(&.{.@"fn"})) {
@@ -48,8 +51,13 @@ pub const Parser = struct {
         return try self.parseStatement();
     }
 
-    fn parseVarDeclaration(self: *Parser) ParseError!ast.Statement.VarDeclaration {
+    fn parseVarDeclaration(self: *Parser, mutability: ast.Mutability) ParseError!ast.Statement.VarDeclaration {
         const name = try self.consume(.identifier, "Expect variable name");
+
+        var type_annotation: ?Token = null;
+        if (self.match(&.{.colon})) {
+            type_annotation = try self.consume(.identifier, "Expect type name");
+        }
 
         var initializer: ?ast.Expression = null;
         if (self.match(&.{.equal})) {
@@ -59,7 +67,20 @@ pub const Parser = struct {
         _ = try self.consume(.semicolon, "Expect ';' after variable declaration");
         return .{
             .name = name,
+            .type_annotation = type_annotation,
             .initializer = initializer,
+            .mutability = mutability,
+        };
+    }
+
+    fn parseFnParam(self: *Parser) ParseError!ast.Param {
+        const param_name = try self.consume(.identifier, "Expect parameter name");
+        _ = try self.consume(.colon, "Expect ':' after parameter name");
+        const param_type = try self.consume(.identifier, "Expect parameter type");
+
+        return .{
+            .name = param_name,
+            .type_annotation = param_type,
         };
     }
 
@@ -68,14 +89,27 @@ pub const Parser = struct {
         _ = try self.consume(.lparen, "Expect '(' after function name.");
 
         // Parse parameters
-        var params: std.ArrayList(Token) = .{};
+        var params: std.ArrayList(ast.Param) = .{};
         if (!self.check(.rparen)) {
-            try params.append(self.allocator, try self.consume(.identifier, "Expect parameter name"));
+            try params.append(
+                self.allocator,
+                try self.parseFnParam(),
+            );
+
             while (self.match(&.{.comma})) {
-                try params.append(self.allocator, try self.consume(.identifier, "Expect parameter name"));
+                try params.append(
+                    self.allocator,
+                    try self.parseFnParam(),
+                );
             }
         }
         _ = try self.consume(.rparen, "Expect ')' after parameters.");
+
+        var return_type: ?Token = null;
+        if (self.check(.identifier)) {
+            return_type = self.advance();
+        }
+
         _ = try self.consume(.lbrace, "Expect '{' before function body.");
 
         // Parse body
@@ -88,6 +122,7 @@ pub const Parser = struct {
         return .{
             .name = name,
             .params = params.items,
+            .return_type = return_type,
             .body = body.items,
         };
     }

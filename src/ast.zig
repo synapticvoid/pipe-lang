@@ -13,12 +13,15 @@ pub const Statement = union(enum) {
 
     pub const VarDeclaration = struct {
         name: Token,
+        type_annotation: ?Token,
         initializer: ?Expression,
+        mutability: Mutability,
     };
 
     pub const FnDeclaration = struct {
         name: Token,
-        params: []const Token,
+        params: []Param,
+        return_type: ?Token,
         body: []const Statement,
     };
 };
@@ -37,7 +40,6 @@ pub const Expression = union(enum) {
     // Operations
     unary: *Unary,
     binary: *Binary,
-
 
     // Control flow
     if_expr: *If,
@@ -120,3 +122,12 @@ pub const Value = union(enum) {
     }
 };
 
+pub const Mutability = enum {
+    mutable,
+    constant,
+};
+
+pub const Param = struct {
+    name: Token,
+    type_annotation: Token,
+};

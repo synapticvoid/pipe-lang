@@ -177,12 +177,11 @@ pub const Interpreter = struct {
         env.* = Environment.init(function.closure, self.allocator);
         for (args, function.declaration.params) |arg, param| {
             const value = try self.evaluate(arg);
-            try env.define(param.lexeme, value);
+            try env.define(param.name.lexeme, value);
         }
 
         // Execute function's body
         return try self.evaluateBlock(function.declaration.body, env);
-
     }
 };
 

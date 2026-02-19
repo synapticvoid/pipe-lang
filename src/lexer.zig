@@ -52,6 +52,7 @@ pub const Lexer = struct {
             ')' => try self.addToken(.rparen, null),
             '{' => try self.addToken(.lbrace, null),
             '}' => try self.addToken(.rbrace, null),
+            ':' => try self.addToken(.colon, null),
             ';' => try self.addToken(.semicolon, null),
             ',' => try self.addToken(.comma, null),
 
