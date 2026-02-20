@@ -4,9 +4,19 @@ const types = @import("types.zig");
 const PipeType = types.PipeType;
 const Token = @import("tokens.zig").Token;
 
-const VariableInfo = struct {
+const TypeInfo = union(enum) {
+    variable: VariableSignature,
+    function: FunctionSignature,
+};
+
+const VariableSignature = struct {
     pipe_type: PipeType,
     mutability: ast.Mutability,
+};
+
+const FunctionSignature = struct {
+    param_types: []PipeType,
+    return_type: PipeType,
 };
 
 const TypeCheckError = error{
@@ -19,23 +29,23 @@ const TypeCheckError = error{
 
 const TypeEnvironment = struct {
     enclosing: ?*TypeEnvironment,
-    variables: std.StringHashMap(VariableInfo),
+    symbols: std.StringHashMap(TypeInfo),
     allocator: std.mem.Allocator,
 
     pub fn init(enclosing: ?*TypeEnvironment, allocator: std.mem.Allocator) TypeEnvironment {
         return .{
             .enclosing = enclosing,
-            .variables = std.StringHashMap(VariableInfo).init(allocator),
+            .symbols = std.StringHashMap(TypeInfo).init(allocator),
             .allocator = allocator,
         };
     }
 
-    pub fn define(self: *TypeEnvironment, name: []const u8, info: VariableInfo) !void {
-        try self.variables.put(name, info);
+    pub fn define(self: *TypeEnvironment, name: []const u8, info: TypeInfo) !void {
+        try self.symbols.put(name, info);
     }
 
-    pub fn get(self: *TypeEnvironment, name: []const u8) !VariableInfo {
-        if (self.variables.get(name)) |info| {
+    pub fn get(self: *TypeEnvironment, name: []const u8) !TypeInfo {
+        if (self.symbols.get(name)) |info| {
             return info;
         } else if (self.enclosing) |enclosing| {
             return enclosing.get(name);
@@ -87,7 +97,7 @@ pub const TypeChecker = struct {
         // If else expression exists, its type must match with then
         if (if_expr.else_branch) |else_branch| {
             const else_type = try self.checkExpression(else_branch);
-            if (then_type != else_type) {
+            if (!then_type.compatible(else_type)) {
                 return error.TypeMismatch;
             }
             return then_type;
@@ -97,15 +107,21 @@ pub const TypeChecker = struct {
     }
 
     fn checkFunctionDeclaration(self: *TypeChecker, decl: ast.Statement.FnDeclaration) !void {
+        // Create function's environment
         var env = try self.allocator.create(TypeEnvironment);
         env.* = TypeEnvironment.init(self.env, self.allocator);
 
+        const param_types = try self.allocator.alloc(PipeType, decl.params.len);
+
         // Resolve type for each param
-        for (decl.params) |param| {
-            try env.define(param.name.lexeme, .{
-                .pipe_type = try resolveTypeName(param.type_annotation.lexeme),
+        for (decl.params, 0..) |param, i| {
+            const param_type = try resolveTypeName(param.type_annotation.lexeme);
+            try env.define(param.name.lexeme, .{ .variable = .{
+                .pipe_type = param_type,
                 .mutability = .mutable,
-            });
+            } });
+
+            param_types[i] = param_type;
         }
 
         // Swap current env for type checking
@@ -116,7 +132,17 @@ pub const TypeChecker = struct {
         // Type check body statements
         try self.check(decl.body);
 
-        // TODO: check return type
+        // Resolve return type
+        var return_type = PipeType.unit;
+        if (decl.return_type) |ret_type| {
+            return_type = try resolveTypeName(ret_type.lexeme);
+        }
+
+        // Define function in environment
+        try previous.define(decl.name.lexeme, .{ .function = .{
+            .param_types = param_types,
+            .return_type = return_type,
+        } });
     }
 
     fn checkUnary(self: *TypeChecker, unary: *ast.Expression.Unary) !PipeType {
@@ -134,28 +160,37 @@ pub const TypeChecker = struct {
         return switch (binary.operator.type) {
             // TODO: Handle float type
             .plus, .minus, .star, .slash => if (left_type.isNumeric() and right_type.isNumeric()) .int else error.TypeMismatch,
-            .equal_equal, .bang_equal => if (left_type == right_type) .bool else error.TypeMismatch,
+            .equal_equal, .bang_equal => if (left_type.compatible(right_type)) .bool else error.TypeMismatch,
             .less, .less_equal, .greater, .greater_equal => if (left_type.isNumeric() and right_type.isNumeric()) .bool else error.TypeMismatch,
             else => error.TypeMismatch,
         };
     }
 
     fn checkVariable(self: *TypeChecker, v: ast.Expression.Variable) !PipeType {
-        return (try self.env.get(v.token.lexeme)).pipe_type;
+        const info = try self.env.get(v.token.lexeme);
+        return switch (info) {
+            .variable => |v_sig| v_sig.pipe_type,
+            .function => error.TypeMismatch,
+        };
     }
 
     fn checkAssignment(self: *TypeChecker, assign: *ast.Expression.VariableAssignment) !PipeType {
         const info = try self.env.get(assign.token.lexeme);
-        if (info.mutability == .constant) {
+        const v = switch (info) {
+            .variable => |v_sig| v_sig,
+            .function => return error.TypeMismatch,
+        };
+
+        if (v.mutability == .constant) {
             return error.ConstReassignment;
         }
 
         const value_type = try self.checkExpression(assign.value);
-        if (info.pipe_type != value_type) {
+        if (!v.pipe_type.compatible(value_type)) {
             return error.TypeMismatch;
         }
 
-        return info.pipe_type;
+        return v.pipe_type;
     }
 
     fn checkVarDeclaration(self: *TypeChecker, decl: ast.Statement.VarDeclaration) !void {
@@ -170,7 +205,7 @@ pub const TypeChecker = struct {
                 const annotated = try resolveTypeName(annotation.lexeme);
 
                 // 3. If botch, check they match
-                if (inferred != annotated) {
+                if (!inferred.compatible(annotated)) {
                     return error.TypeMismatch;
                 } else {
                     resolved_type = inferred;
@@ -187,10 +222,10 @@ pub const TypeChecker = struct {
         }
 
         // 4. Define in environment with the resolved type + decl.mutability
-        try self.env.define(decl.name.lexeme, .{
+        try self.env.define(decl.name.lexeme, .{ .variable = .{
             .pipe_type = resolved_type,
             .mutability = decl.mutability,
-        });
+        } });
     }
 
     fn checkLiteral(_: *TypeChecker, literal: ast.Expression.Literal) !PipeType {
