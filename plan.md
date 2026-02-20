@@ -29,13 +29,13 @@ Pipeline: **Source → Lexer → Parser → AST → `Type Checker` → Interpret
 - [x] Functions: type-check body, validate return type (return type validation TODO)
 
 ## Step 4b — Function calls & `Any` type
-- [ ] Add `any` variant to `PipeType`
-- [ ] Add `compatible(other)` method to `PipeType` (returns true if either is `any` or both are equal)
-- [ ] Replace `==` type comparisons with `compatible()` in type checker
-- [ ] Store function signatures in `TypeEnvironment` (param types + return type)
-- [ ] Register built-in functions (`print(Any) → Unit`) in root environment
-- [ ] `checkFnCall`: validate arg count, check each arg type against param type
-- [ ] `checkFnCall`: return the function's declared return type
+- [x] Add `any` variant to `PipeType`
+- [x] Add `compatible(other)` method to `PipeType` (returns true if either is `any` or both are equal)
+- [x] Replace `==` type comparisons with `compatible()` in type checker
+- [x] Store function signatures in `TypeEnvironment` (param types + return type)
+- [x] Register built-in functions (`print(Any) → Unit`) in root environment
+- [x] `checkFnCall`: validate arg count, check each arg type against param type
+- [x] `checkFnCall`: return the function's declared return type
 - [ ] Validate return type in `checkFunctionDeclaration`
 
 ## Step 5 — Wire into `main.zig`

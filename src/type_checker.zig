@@ -1,10 +1,12 @@
 const std = @import("std");
+
 const ast = @import("ast.zig");
+const builtins = @import("builtins.zig");
 const types = @import("types.zig");
 const PipeType = types.PipeType;
 const Token = @import("tokens.zig").Token;
 
-const TypeInfo = union(enum) {
+pub const TypeInfo = union(enum) {
     variable: VariableSignature,
     function: FunctionSignature,
 };
@@ -15,7 +17,7 @@ const VariableSignature = struct {
 };
 
 const FunctionSignature = struct {
-    param_types: []PipeType,
+    param_types: []const PipeType,
     return_type: PipeType,
 };
 
@@ -27,7 +29,7 @@ const TypeCheckError = error{
     OutOfMemory,
 };
 
-const TypeEnvironment = struct {
+pub const TypeEnvironment = struct {
     enclosing: ?*TypeEnvironment,
     symbols: std.StringHashMap(TypeInfo),
     allocator: std.mem.Allocator,
@@ -62,6 +64,8 @@ pub const TypeChecker = struct {
     pub fn init(allocator: std.mem.Allocator) !TypeChecker {
         const env = try allocator.create(TypeEnvironment);
         env.* = TypeEnvironment.init(null, allocator);
+        try builtins.registerAllTypes(env);
+
         return .{ .env = env, .allocator = allocator };
     }
 
@@ -75,106 +79,78 @@ pub const TypeChecker = struct {
         }
     }
 
-    fn checkExpression(self: *TypeChecker, expr: ast.Expression) TypeCheckError!PipeType {
+    // --- Expression type checking ---
+
+    fn checkExpression(self: *TypeChecker, expr: ast.Expression) TypeCheckError!TypeInfo {
         return switch (expr) {
-            .unary => |u| self.checkUnary(u),
-            .binary => |u| self.checkBinary(u),
             .literal => |lit| self.checkLiteral(lit),
             .variable => |v| self.checkVariable(v),
+            .unary => |u| self.checkUnary(u),
+            .binary => |b| self.checkBinary(b),
             .if_expr => |if_expr| self.checkIf(if_expr),
             .var_assignment => |assign| self.checkAssignment(assign),
+            .fn_call => |call| self.checkFnCall(call),
             else => error.TypeMismatch,
         };
     }
 
-    fn checkIf(self: *TypeChecker, if_expr: *ast.Expression.If) !PipeType {
-        const condition_type = try self.checkExpression(if_expr.condition);
+    fn checkLiteral(_: *TypeChecker, literal: ast.Expression.Literal) !TypeInfo {
+        const pipe_type: PipeType = switch (literal.value) {
+            .boolean => .bool,
+            .int => .int,
+            .string => .string,
+            .null, .unit => .unit,
+            .function => return error.TypeMismatch,
+        };
+        return .{ .variable = .{ .pipe_type = pipe_type, .mutability = .constant } };
+    }
+
+    fn checkVariable(self: *TypeChecker, v: ast.Expression.Variable) !TypeInfo {
+        return self.env.get(v.token.lexeme);
+    }
+
+    fn checkUnary(self: *TypeChecker, unary: *ast.Expression.Unary) !TypeInfo {
+        const right_type = try expectType(try self.checkExpression(unary.right));
+        const result: PipeType = switch (unary.operator.type) {
+            .bang => if (right_type == .bool) .bool else return error.TypeMismatch,
+            .minus => if (right_type.isNumeric()) right_type else return error.TypeMismatch,
+            else => return error.TypeMismatch,
+        };
+        return .{ .variable = .{ .pipe_type = result, .mutability = .constant } };
+    }
+
+    fn checkBinary(self: *TypeChecker, binary: *ast.Expression.Binary) !TypeInfo {
+        const left_type = try expectType(try self.checkExpression(binary.left));
+        const right_type = try expectType(try self.checkExpression(binary.right));
+        const result: PipeType = switch (binary.operator.type) {
+            // TODO: Handle float type
+            .plus, .minus, .star, .slash => if (left_type.isNumeric() and right_type.isNumeric()) .int else return error.TypeMismatch,
+            .equal_equal, .bang_equal => if (left_type.compatible(right_type)) .bool else return error.TypeMismatch,
+            .less, .less_equal, .greater, .greater_equal => if (left_type.isNumeric() and right_type.isNumeric()) .bool else return error.TypeMismatch,
+            else => return error.TypeMismatch,
+        };
+        return .{ .variable = .{ .pipe_type = result, .mutability = .constant } };
+    }
+
+    fn checkIf(self: *TypeChecker, if_expr: *ast.Expression.If) !TypeInfo {
+        const condition_type = try expectType(try self.checkExpression(if_expr.condition));
         if (condition_type != .bool) {
             return error.TypeMismatch;
         }
 
-        const then_type = try self.checkExpression(if_expr.then_branch);
-        // If else expression exists, its type must match with then
+        const then_type = try expectType(try self.checkExpression(if_expr.then_branch));
         if (if_expr.else_branch) |else_branch| {
-            const else_type = try self.checkExpression(else_branch);
+            const else_type = try expectType(try self.checkExpression(else_branch));
             if (!then_type.compatible(else_type)) {
                 return error.TypeMismatch;
             }
-            return then_type;
+            return .{ .variable = .{ .pipe_type = then_type, .mutability = .constant } };
         }
 
-        return PipeType.unit;
+        return .{ .variable = .{ .pipe_type = .unit, .mutability = .constant } };
     }
 
-    fn checkFunctionDeclaration(self: *TypeChecker, decl: ast.Statement.FnDeclaration) !void {
-        // Create function's environment
-        var env = try self.allocator.create(TypeEnvironment);
-        env.* = TypeEnvironment.init(self.env, self.allocator);
-
-        const param_types = try self.allocator.alloc(PipeType, decl.params.len);
-
-        // Resolve type for each param
-        for (decl.params, 0..) |param, i| {
-            const param_type = try resolveTypeName(param.type_annotation.lexeme);
-            try env.define(param.name.lexeme, .{ .variable = .{
-                .pipe_type = param_type,
-                .mutability = .mutable,
-            } });
-
-            param_types[i] = param_type;
-        }
-
-        // Swap current env for type checking
-        const previous = self.env;
-        self.env = env;
-        defer self.env = previous;
-
-        // Type check body statements
-        try self.check(decl.body);
-
-        // Resolve return type
-        var return_type = PipeType.unit;
-        if (decl.return_type) |ret_type| {
-            return_type = try resolveTypeName(ret_type.lexeme);
-        }
-
-        // Define function in environment
-        try previous.define(decl.name.lexeme, .{ .function = .{
-            .param_types = param_types,
-            .return_type = return_type,
-        } });
-    }
-
-    fn checkUnary(self: *TypeChecker, unary: *ast.Expression.Unary) !PipeType {
-        const right_type = try self.checkExpression(unary.right);
-        return switch (unary.operator.type) {
-            .bang => if (right_type == .bool) .bool else error.TypeMismatch,
-            .minus => if (right_type.isNumeric()) right_type else error.TypeMismatch,
-            else => error.TypeMismatch,
-        };
-    }
-
-    fn checkBinary(self: *TypeChecker, binary: *ast.Expression.Binary) !PipeType {
-        const left_type = try self.checkExpression(binary.left);
-        const right_type = try self.checkExpression(binary.right);
-        return switch (binary.operator.type) {
-            // TODO: Handle float type
-            .plus, .minus, .star, .slash => if (left_type.isNumeric() and right_type.isNumeric()) .int else error.TypeMismatch,
-            .equal_equal, .bang_equal => if (left_type.compatible(right_type)) .bool else error.TypeMismatch,
-            .less, .less_equal, .greater, .greater_equal => if (left_type.isNumeric() and right_type.isNumeric()) .bool else error.TypeMismatch,
-            else => error.TypeMismatch,
-        };
-    }
-
-    fn checkVariable(self: *TypeChecker, v: ast.Expression.Variable) !PipeType {
-        const info = try self.env.get(v.token.lexeme);
-        return switch (info) {
-            .variable => |v_sig| v_sig.pipe_type,
-            .function => error.TypeMismatch,
-        };
-    }
-
-    fn checkAssignment(self: *TypeChecker, assign: *ast.Expression.VariableAssignment) !PipeType {
+    fn checkAssignment(self: *TypeChecker, assign: *ast.Expression.VariableAssignment) !TypeInfo {
         const info = try self.env.get(assign.token.lexeme);
         const v = switch (info) {
             .variable => |v_sig| v_sig,
@@ -185,26 +161,45 @@ pub const TypeChecker = struct {
             return error.ConstReassignment;
         }
 
-        const value_type = try self.checkExpression(assign.value);
+        const value_type = try expectType(try self.checkExpression(assign.value));
         if (!v.pipe_type.compatible(value_type)) {
             return error.TypeMismatch;
         }
 
-        return v.pipe_type;
+        return .{ .variable = .{ .pipe_type = v.pipe_type, .mutability = v.mutability } };
     }
+
+    fn checkFnCall(self: *TypeChecker, call: *ast.Expression.FnCall) !TypeInfo {
+        const callee_info = try self.checkExpression(call.callee);
+        const sig = switch (callee_info) {
+            .function => |s| s,
+            .variable => return error.TypeMismatch,
+        };
+
+        if (call.args.len != sig.param_types.len) {
+            return error.TypeMismatch;
+        }
+
+        for (call.args, sig.param_types) |arg, param_type| {
+            const arg_type = try expectType(try self.checkExpression(arg));
+            if (!arg_type.compatible(param_type)) {
+                return error.TypeMismatch;
+            }
+        }
+
+        return .{ .variable = .{ .pipe_type = sig.return_type, .mutability = .constant } };
+    }
+
+    // --- Declaration type checking ---
 
     fn checkVarDeclaration(self: *TypeChecker, decl: ast.Statement.VarDeclaration) !void {
         var resolved_type: PipeType = undefined;
 
-        // 1. If initializer exists, infer its type
         if (decl.initializer) |init_expr| {
-            const inferred = try self.checkExpression(init_expr);
+            const inferred = try expectType(try self.checkExpression(init_expr));
 
-            // 2. If annotation exists, resolve it
             if (decl.type_annotation) |annotation| {
                 const annotated = try resolveTypeName(annotation.lexeme);
-
-                // 3. If botch, check they match
                 if (!inferred.compatible(annotated)) {
                     return error.TypeMismatch;
                 } else {
@@ -214,26 +209,54 @@ pub const TypeChecker = struct {
                 resolved_type = inferred;
             }
         } else if (decl.type_annotation) |annotation| {
-            // Annotation only: trust it
             resolved_type = try resolveTypeName(annotation.lexeme);
         } else {
-            // Neither, can't determine type
             return error.TypeMismatch;
         }
 
-        // 4. Define in environment with the resolved type + decl.mutability
         try self.env.define(decl.name.lexeme, .{ .variable = .{
             .pipe_type = resolved_type,
             .mutability = decl.mutability,
         } });
     }
 
-    fn checkLiteral(_: *TypeChecker, literal: ast.Expression.Literal) !PipeType {
-        return switch (literal.value) {
-            .boolean => PipeType.bool,
-            .int => PipeType.int,
-            .string => PipeType.string,
-            .null, .unit => PipeType.unit,
+    fn checkFunctionDeclaration(self: *TypeChecker, decl: ast.Statement.FnDeclaration) !void {
+        var env = try self.allocator.create(TypeEnvironment);
+        env.* = TypeEnvironment.init(self.env, self.allocator);
+
+        const param_types = try self.allocator.alloc(PipeType, decl.params.len);
+
+        for (decl.params, 0..) |param, i| {
+            const param_type = try resolveTypeName(param.type_annotation.lexeme);
+            try env.define(param.name.lexeme, .{ .variable = .{
+                .pipe_type = param_type,
+                .mutability = .mutable,
+            } });
+            param_types[i] = param_type;
+        }
+
+        const previous = self.env;
+        self.env = env;
+        defer self.env = previous;
+
+        try self.check(decl.body);
+
+        var return_type = PipeType.unit;
+        if (decl.return_type) |ret_type| {
+            return_type = try resolveTypeName(ret_type.lexeme);
+        }
+
+        try previous.define(decl.name.lexeme, .{ .function = .{
+            .param_types = param_types,
+            .return_type = return_type,
+        } });
+    }
+
+    // --- Helpers ---
+
+    fn expectType(info: TypeInfo) !PipeType {
+        return switch (info) {
+            .variable => |v| v.pipe_type,
             .function => error.TypeMismatch,
         };
     }
@@ -242,7 +265,6 @@ pub const TypeChecker = struct {
         if (typeNames.get(name)) |pipe_type| {
             return pipe_type;
         } else {
-            // TODO handle custom types?
             return error.UndefinedType;
         }
     }

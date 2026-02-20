@@ -1,14 +1,24 @@
 const std = @import("std");
 const BuiltinFn = @import("callable.zig").Callable.BuiltinFn;
-const Value = @import("ast.zig").Value;
 const Environment = @import("environment.zig").Environment;
+const PipeType = @import("types.zig").PipeType;
 const RuntimeContext = @import("runtime.zig").RuntimeContext;
+const TypeEnvironment = @import("type_checker.zig").TypeEnvironment;
+const TypeInfo = @import("type_checker.zig").TypeInfo;
+const Value = @import("ast.zig").Value;
 
 pub fn registerAll(env: *Environment) !void {
     try registerFn(env, "print", printFn);
 }
 
-fn registerFn(env: *Environment, name: []const u8, function: BuiltinFn.Func ) !void {
+pub fn registerAllTypes(env: *TypeEnvironment) !void {
+    try env.define("print", .{ .function = .{
+        .param_types = &.{PipeType.any},
+        .return_type = PipeType.unit,
+    } });
+}
+
+fn registerFn(env: *Environment, name: []const u8, function: BuiltinFn.Func) !void {
     try env.define(name, .{ .function = .{ .builtin = .{
         .name = name,
         .func = function,
