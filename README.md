@@ -1,40 +1,46 @@
-Using zig 0.15.2.
+![CI](https://github.com/synapticvoid/pipe-lang/actions/workflows/ci.yml/badge.svg)
+![Zig](https://img.shields.io/badge/zig-0.15.2-f7a41d)
+![License](https://img.shields.io/github/license/synapticvoid/pipe-lang)
 
 ## Syntax
+
+### Variables
 ```zig
-// All types are in PascalCase
-// Int, Float, Bool, String, etc
-// Variable declaration
-var a: Int = 1;
+// All types are in PascalCase: Int, Float, Bool, String, etc
+var a: Int = 1   // explicit type
+var b = 2.5      // type inference
+const name = "Bob"
+```
 
-// Type inference
-var b = 2.5;
-
-// constant values
-const name = "Bob";
-
-// Function declaration
+### Functions
+```zig
 fn add(a: Int, b: Int) Int {
     return a + b;
 }
+```
 
-// Control flow - if
+### Control flow
+```zig
+// if statement
 if a > b {
     print("a is greater than b");
 }
 
-// if is an expression
+// if as an expression
 var max = if a > b { a } else { b };
 print("The max is $max);
 
-// Control flow - when
+// when (pattern matching)
 when a {
     1 => print("a is 1");
     2 => print("a is 2");
     else => print("a is not 1 or 2");
 }
+```
 
-// Error handling - declare an error type
+### Error handling
+```zig
+// Declare an error type
 error MathError { DivByZero, Overflow }
 
 // Fallible function: returns MathError!Int or !Int (inferred)
@@ -54,7 +60,7 @@ const result = divide(10, 0) catch { -1 };
 // catch with binding
 const result = divide(10, 0) catch |e| { print(e); -1 };
 
-// Easy path: untyped error with a message
+// Untyped error with a message
 fn lookup(id: Int) !String {
     return fail("not found");
 }

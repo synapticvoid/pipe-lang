@@ -18,4 +18,3 @@ pub const Callable = union(enum) {
         func: Func,
     };
 };
-
