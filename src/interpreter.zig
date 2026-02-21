@@ -54,25 +54,25 @@ pub const Interpreter = struct {
 
     pub fn execute(self: *Interpreter, statement: ast.Statement) !void {
         switch (statement) {
-            .var_declaration => |decl| try self.declareVar(decl),
-            .fn_declaration => |decl| try self.declareFn(decl),
+            .var_declaration => |decl| try self.executeVarDeclarationStatement(decl),
+            .fn_declaration => |decl| try self.executeFnDeclarationStatement(decl),
             .expression => |expr| _ = try self.evaluate(expr),
-            .@"return" => |r| try self.executeReturn(r),
+            .@"return" => |r| try self.executeReturnStatement(r),
         }
     }
 
-    fn declareVar(self: *Interpreter, var_expr: ast.Statement.VarDeclaration) !void {
-        const value = if (var_expr.initializer) |init_expr| try self.evaluate(init_expr) else Value.null;
-        try self.env.define(var_expr.name.lexeme, value);
+    fn executeVarDeclarationStatement(self: *Interpreter, decl: ast.Statement.VarDeclaration) !void {
+        const value = if (decl.initializer) |init_expr| try self.evaluate(init_expr) else Value.null;
+        try self.env.define(decl.name.lexeme, value);
     }
 
-    fn declareFn(self: *Interpreter, fn_expr: ast.Statement.FnDeclaration) !void {
-        const user_fn = Callable.UserFn{ .closure = self.env, .declaration = fn_expr };
-        try self.env.define(fn_expr.name.lexeme, .{ .function = .{ .user = user_fn } });
+    fn executeFnDeclarationStatement(self: *Interpreter, decl: ast.Statement.FnDeclaration) !void {
+        const user_fn = Callable.UserFn{ .closure = self.env, .declaration = decl };
+        try self.env.define(decl.name.lexeme, .{ .function = .{ .user = user_fn } });
     }
 
-    fn executeReturn(self: *Interpreter, return_expr: ast.Statement.Return) !void {
-        if (return_expr.value) |value| {
+    fn executeReturnStatement(self: *Interpreter, ret: ast.Statement.Return) !void {
+        if (ret.value) |value| {
             self.return_value = try self.evaluate(value);
         } else {
             self.return_value = .unit;
@@ -149,7 +149,7 @@ pub const Interpreter = struct {
                 const function = try self.evaluate(e.callee);
                 switch (function) {
                     .function => |callable| switch (callable) {
-                        .user => |user_fn| return try self.callFunction(user_fn, e.args),
+                        .user => |user_fn| return try self.callUserFn(user_fn, e.args),
                         .builtin => |builtin_fn| {
                             var args: std.ArrayList(Value) = .{};
                             for (e.args) |arg| {
@@ -189,7 +189,7 @@ pub const Interpreter = struct {
         };
     }
 
-    pub fn callFunction(self: *Interpreter, function: Callable.UserFn, args: []const Expression) !Value {
+    pub fn callUserFn(self: *Interpreter, function: Callable.UserFn, args: []const Expression) !Value {
         // Create environment with params
         const env = try self.allocator.create(Environment);
         env.* = Environment.init(function.closure, self.allocator);
@@ -212,6 +212,7 @@ pub const Interpreter = struct {
 
 // NOTE: -- Helpers
 
+// Return whether a value is considered true in boolean context.
 fn isTruthy(value: Value) bool {
     return switch (value) {
         .null => false,

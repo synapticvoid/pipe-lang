@@ -17,6 +17,8 @@ pub const Parser = struct {
     allocator: std.mem.Allocator,
     last_error: ?[]const u8 = null,
 
+    // NOTE: -- Public API
+
     pub fn init(tokens: []const Token, allocator: std.mem.Allocator) Parser {
         return .{
             .tokens = tokens,
@@ -38,20 +40,20 @@ pub const Parser = struct {
 
     fn parseDeclaration(self: *Parser) ParseError!ast.Statement {
         if (self.match(&.{.@"var"})) {
-            return .{ .var_declaration = try self.parseVarDeclaration(ast.Mutability.mutable) };
+            return .{ .var_declaration = try self.parseVarDeclarationStatement(ast.Mutability.mutable) };
         }
         if (self.match(&.{.@"const"})) {
-            return .{ .var_declaration = try self.parseVarDeclaration(ast.Mutability.constant) };
+            return .{ .var_declaration = try self.parseVarDeclarationStatement(ast.Mutability.constant) };
         }
 
         if (self.match(&.{.@"fn"})) {
-            return .{ .fn_declaration = try self.parseFnDeclaration() };
+            return .{ .fn_declaration = try self.parseFnDeclarationStatement() };
         }
 
         return try self.parseStatement();
     }
 
-    fn parseVarDeclaration(self: *Parser, mutability: ast.Mutability) ParseError!ast.Statement.VarDeclaration {
+    fn parseVarDeclarationStatement(self: *Parser, mutability: ast.Mutability) ParseError!ast.Statement.VarDeclaration {
         const name = try self.consume(.identifier, "Expect variable name");
 
         var type_annotation: ?Token = null;
@@ -73,18 +75,7 @@ pub const Parser = struct {
         };
     }
 
-    fn parseFnParam(self: *Parser) ParseError!ast.Param {
-        const param_name = try self.consume(.identifier, "Expect parameter name");
-        _ = try self.consume(.colon, "Expect ':' after parameter name");
-        const param_type = try self.consume(.identifier, "Expect parameter type");
-
-        return .{
-            .name = param_name,
-            .type_annotation = param_type,
-        };
-    }
-
-    fn parseFnDeclaration(self: *Parser) ParseError!ast.Statement.FnDeclaration {
+    fn parseFnDeclarationStatement(self: *Parser) ParseError!ast.Statement.FnDeclaration {
         const name = try self.consume(.identifier, "Expect function name.");
         _ = try self.consume(.lparen, "Expect '(' after function name.");
 
@@ -124,6 +115,17 @@ pub const Parser = struct {
             .params = params.items,
             .return_type = return_type,
             .body = body.items,
+        };
+    }
+
+    fn parseFnParam(self: *Parser) ParseError!ast.Param {
+        const param_name = try self.consume(.identifier, "Expect parameter name");
+        _ = try self.consume(.colon, "Expect ':' after parameter name");
+        const param_type = try self.consume(.identifier, "Expect parameter type");
+
+        return .{
+            .name = param_name,
+            .type_annotation = param_type,
         };
     }
 
@@ -178,7 +180,7 @@ pub const Parser = struct {
 
             switch (expr) {
                 .variable => {
-                    const assignment = try self.allocator.create(ast.Expression.VariableAssignment);
+                    const assignment = try self.allocator.create(ast.Expression.VarAssignment);
                     assignment.* = .{ .token = expr.variable.token, .value = value };
                     return ast.Expression{ .var_assignment = assignment };
                 },
@@ -332,6 +334,7 @@ pub const Parser = struct {
 
     // NOTE: -- Helpers
 
+    // Parse a left-associative binary expression for the given operator set.
     fn parseBinaryLeft(self: *Parser, parse_operand: *const fn (*Parser) ParseError!ast.Expression, operators: []const TokenType) ParseError!ast.Expression {
         var left = try parse_operand(self);
 
@@ -347,18 +350,22 @@ pub const Parser = struct {
         return left;
     }
 
+    // True when the current token is EOF.
     fn isAtEnd(self: *const Parser) bool {
         return self.peek().type == TokenType.eof;
     }
 
+    // Return the current token without consuming it.
     fn peek(self: *const Parser) Token {
         return self.tokens[self.current];
     }
 
+    // Return the most recently consumed token.
     fn previous(self: *const Parser) Token {
         return self.tokens[self.current - 1];
     }
 
+    // Consume and return the current token.
     fn advance(self: *Parser) Token {
         if (!self.isAtEnd()) {
             self.current += 1;
@@ -366,6 +373,7 @@ pub const Parser = struct {
         return self.previous();
     }
 
+    // Advance if the current token matches any of the given types.
     fn match(self: *Parser, types: []const TokenType) bool {
         for (types) |t| {
             if (self.check(t)) {
@@ -376,6 +384,7 @@ pub const Parser = struct {
         return false;
     }
 
+    // Expect and consume a specific token, or error.
     fn consume(self: *Parser, token_type: TokenType, error_message: []const u8) ParseError!Token {
         if (self.check(token_type)) {
             return self.advance();
@@ -384,6 +393,7 @@ pub const Parser = struct {
         return error.UnexpectedToken;
     }
 
+    // True if the current token is of the given type (without consuming).
     fn check(self: *const Parser, t: TokenType) bool {
         if (self.isAtEnd()) {
             return false;

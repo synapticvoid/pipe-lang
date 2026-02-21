@@ -43,7 +43,7 @@ pub const Expression = union(enum) {
 
     // Variables
     variable: Variable,
-    var_assignment: *VariableAssignment,
+    var_assignment: *VarAssignment,
 
     // Functions
     fn_call: *FnCall,
@@ -68,7 +68,7 @@ pub const Expression = union(enum) {
         token: Token,
     };
 
-    pub const VariableAssignment = struct {
+    pub const VarAssignment = struct {
         token: Token,
         value: Expression,
     };

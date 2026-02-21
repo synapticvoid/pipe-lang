@@ -7,16 +7,16 @@ const PipeType = types.PipeType;
 const Token = @import("tokens.zig").Token;
 
 pub const TypeInfo = union(enum) {
-    variable: VariableSignature,
-    function: FunctionSignature,
+    variable: VarSignature,
+    function: FnSignature,
 };
 
-const VariableSignature = struct {
+const VarSignature = struct {
     pipe_type: PipeType,
     mutability: ast.Mutability,
 };
 
-const FunctionSignature = struct {
+const FnSignature = struct {
     param_types: []const PipeType,
     return_type: PipeType,
 };
@@ -63,6 +63,8 @@ pub const TypeChecker = struct {
     last_error: ?[]const u8 = null,
     allocator: std.mem.Allocator,
 
+    // NOTE: -- Public API
+
     pub fn init(allocator: std.mem.Allocator) !TypeChecker {
         const env = try allocator.create(TypeEnvironment);
         env.* = TypeEnvironment.init(null, allocator);
@@ -75,7 +77,119 @@ pub const TypeChecker = struct {
         _ = try self.checkBody(statements);
     }
 
-    // --- Expression type checking ---
+    // NOTE: -- Statements
+
+    fn checkBody(self: *TypeChecker, statements: []const ast.Statement) TypeCheckError!PipeType {
+        var last_type: PipeType = .unit;
+        for (statements) |statement| {
+            switch (statement) {
+                .expression => |expr| last_type = try expectType(try self.checkExpression(expr)),
+                .var_declaration => |decl| {
+                    try self.checkVarDeclarationStatement(decl);
+                    last_type = .unit;
+                },
+                .fn_declaration => |decl| {
+                    try self.checkFnDeclarationStatement(decl);
+                    last_type = .unit;
+                },
+                .@"return" => |ret| last_type = try self.checkReturnStatement(ret),
+            }
+        }
+
+        return last_type;
+    }
+
+    fn checkVarDeclarationStatement(self: *TypeChecker, decl: ast.Statement.VarDeclaration) !void {
+        const line = decl.name.line;
+        var resolved_type: PipeType = undefined;
+
+        if (decl.initializer) |init_expr| {
+            const inferred = try expectType(try self.checkExpression(init_expr));
+
+            if (decl.type_annotation) |annotation| {
+                const annotated = try resolveTypeName(annotation.lexeme);
+                if (!inferred.compatible(annotated)) {
+                    return self.fail(error.TypeMismatch, "Type mismatch: '{s}' declared as {s}, got {s} at line {d}", .{ decl.name.lexeme, @tagName(annotated), @tagName(inferred), line });
+                } else {
+                    resolved_type = inferred;
+                }
+            } else {
+                resolved_type = inferred;
+            }
+        } else if (decl.type_annotation) |annotation| {
+            resolved_type = try resolveTypeName(annotation.lexeme);
+        } else {
+            return self.fail(error.TypeMismatch, "Type mismatch: '{s}' has no type annotation or initializer at line {d}", .{ decl.name.lexeme, line });
+        }
+
+        try self.env.define(decl.name.lexeme, .{ .variable = .{
+            .pipe_type = resolved_type,
+            .mutability = decl.mutability,
+        } });
+    }
+
+    fn checkFnDeclarationStatement(self: *TypeChecker, decl: ast.Statement.FnDeclaration) !void {
+        // Create environment
+        var env = try self.allocator.create(TypeEnvironment);
+        env.* = TypeEnvironment.init(self.env, self.allocator);
+
+        // Save parameter types to env
+        const param_types = try self.allocator.alloc(PipeType, decl.params.len);
+
+        for (decl.params, 0..) |param, i| {
+            const param_type = try resolveTypeName(param.type_annotation.lexeme);
+            try env.define(param.name.lexeme, .{ .variable = .{
+                .pipe_type = param_type,
+                .mutability = .mutable,
+            } });
+            param_types[i] = param_type;
+        }
+
+        // Switch environments to check the function's body
+        const previous = self.env;
+        self.env = env;
+        defer self.env = previous;
+
+        // Resolve return type
+        var return_type = PipeType.unit;
+        if (decl.return_type) |ret_type| {
+            return_type = try resolveTypeName(ret_type.lexeme);
+        }
+
+        // Save a restore the previous return type, we might be in a nested function
+        const previous_return_type = self.expected_return_type;
+        self.expected_return_type = return_type;
+        defer self.expected_return_type = previous_return_type;
+
+        // Check the body
+        const body_type = try self.checkBody(decl.body);
+        if (!body_type.compatible(return_type)) {
+            return self.fail(error.TypeMismatch, "Type mismatch: function '{s}' should return {s}, got {s} at line {d}", .{ decl.name.lexeme, @tagName(return_type), @tagName(body_type), decl.name.line });
+        }
+
+        // Save the function signature to the *enclosing* environment
+        try previous.define(decl.name.lexeme, .{ .function = .{
+            .param_types = param_types,
+            .return_type = return_type,
+        } });
+    }
+
+    fn checkReturnStatement(self: *TypeChecker, ret: ast.Statement.Return) TypeCheckError!PipeType {
+        const return_type: PipeType = if (ret.value) |value|
+            try expectType(try self.checkExpression(value))
+        else
+            .unit;
+
+        if (self.expected_return_type) |expected| {
+            if (!return_type.compatible(expected)) {
+                return self.fail(error.TypeMismatch, "Type mismatch: expected return type {s}, got {s} at line {d}", .{ @tagName(expected), @tagName(return_type), ret.token.line });
+            }
+        }
+
+        return return_type;
+    }
+
+    // NOTE: -- Expressions
 
     fn checkExpression(self: *TypeChecker, expr: ast.Expression) TypeCheckError!TypeInfo {
         return switch (expr) {
@@ -84,7 +198,7 @@ pub const TypeChecker = struct {
             .unary => |u| self.checkUnary(u),
             .binary => |b| self.checkBinary(b),
             .if_expr => |if_expr| self.checkIf(if_expr),
-            .var_assignment => |assign| self.checkAssignment(assign),
+            .var_assignment => |assign| self.checkVarAssignment(assign),
             .fn_call => |call| self.checkFnCall(call),
             else => error.TypeMismatch,
         };
@@ -183,7 +297,7 @@ pub const TypeChecker = struct {
         return .{ .variable = .{ .pipe_type = .unit, .mutability = .constant } };
     }
 
-    fn checkAssignment(self: *TypeChecker, assign: *ast.Expression.VariableAssignment) !TypeInfo {
+    fn checkVarAssignment(self: *TypeChecker, assign: *ast.Expression.VarAssignment) !TypeInfo {
         const info = try self.env.get(assign.token.lexeme);
         const v = switch (info) {
             .variable => |v_sig| v_sig,
@@ -227,125 +341,15 @@ pub const TypeChecker = struct {
         return .{ .variable = .{ .pipe_type = sig.return_type, .mutability = .constant } };
     }
 
-    // --- Declaration type checking ---
+    // NOTE: -- Helpers
 
-    fn checkVarDeclaration(self: *TypeChecker, decl: ast.Statement.VarDeclaration) !void {
-        const line = decl.name.line;
-        var resolved_type: PipeType = undefined;
-
-        if (decl.initializer) |init_expr| {
-            const inferred = try expectType(try self.checkExpression(init_expr));
-
-            if (decl.type_annotation) |annotation| {
-                const annotated = try resolveTypeName(annotation.lexeme);
-                if (!inferred.compatible(annotated)) {
-                    return self.fail(error.TypeMismatch, "Type mismatch: '{s}' declared as {s}, got {s} at line {d}", .{ decl.name.lexeme, @tagName(annotated), @tagName(inferred), line });
-                } else {
-                    resolved_type = inferred;
-                }
-            } else {
-                resolved_type = inferred;
-            }
-        } else if (decl.type_annotation) |annotation| {
-            resolved_type = try resolveTypeName(annotation.lexeme);
-        } else {
-            return self.fail(error.TypeMismatch, "Type mismatch: '{s}' has no type annotation or initializer at line {d}", .{ decl.name.lexeme, line });
-        }
-
-        try self.env.define(decl.name.lexeme, .{ .variable = .{
-            .pipe_type = resolved_type,
-            .mutability = decl.mutability,
-        } });
-    }
-
-    fn checkFunctionDeclaration(self: *TypeChecker, decl: ast.Statement.FnDeclaration) !void {
-        // Create environment
-        var env = try self.allocator.create(TypeEnvironment);
-        env.* = TypeEnvironment.init(self.env, self.allocator);
-
-        // Save parameter types to env
-        const param_types = try self.allocator.alloc(PipeType, decl.params.len);
-
-        for (decl.params, 0..) |param, i| {
-            const param_type = try resolveTypeName(param.type_annotation.lexeme);
-            try env.define(param.name.lexeme, .{ .variable = .{
-                .pipe_type = param_type,
-                .mutability = .mutable,
-            } });
-            param_types[i] = param_type;
-        }
-
-        // Switch environments to check the function's body
-        const previous = self.env;
-        self.env = env;
-        defer self.env = previous;
-
-        // Resolve return type
-        var return_type = PipeType.unit;
-        if (decl.return_type) |ret_type| {
-            return_type = try resolveTypeName(ret_type.lexeme);
-        }
-
-        // Save a restore the previous return type, we might be in a nested function
-        const previous_return_type = self.expected_return_type;
-        self.expected_return_type = return_type;
-        defer self.expected_return_type = previous_return_type;
-
-        // Check the body
-        const body_type = try self.checkBody(decl.body);
-        if (!body_type.compatible(return_type)) {
-            return self.fail(error.TypeMismatch, "Type mismatch: function '{s}' should return {s}, got {s} at line {d}", .{ decl.name.lexeme, @tagName(return_type), @tagName(body_type), decl.name.line });
-        }
-
-        // Save the function signature to the *enclosing* environment
-        try previous.define(decl.name.lexeme, .{ .function = .{
-            .param_types = param_types,
-            .return_type = return_type,
-        } });
-    }
-
-    fn checkBody(self: *TypeChecker, statements: []const ast.Statement) TypeCheckError!PipeType {
-        var last_type: PipeType = .unit;
-        for (statements) |statement| {
-            switch (statement) {
-                .expression => |expr| last_type = try expectType(try self.checkExpression(expr)),
-                .var_declaration => |decl| {
-                    try self.checkVarDeclaration(decl);
-                    last_type = .unit;
-                },
-                .fn_declaration => |decl| {
-                    try self.checkFunctionDeclaration(decl);
-                    last_type = .unit;
-                },
-                .@"return" => |ret| last_type = try self.checkReturn(ret),
-            }
-        }
-
-        return last_type;
-    }
-
-    fn checkReturn(self: *TypeChecker, ret: ast.Statement.Return) TypeCheckError!PipeType {
-        const return_type: PipeType = if (ret.value) |value|
-            try expectType(try self.checkExpression(value))
-        else
-            .unit;
-
-        if (self.expected_return_type) |expected| {
-            if (!return_type.compatible(expected)) {
-                return self.fail(error.TypeMismatch, "Type mismatch: expected return type {s}, got {s} at line {d}", .{ @tagName(expected), @tagName(return_type), ret.token.line });
-            }
-        }
-
-        return return_type;
-    }
-
-    // NOTE: --- Helpers ---
-
+    // Record an error message and return the error.
     fn fail(self: *TypeChecker, err: TypeCheckError, comptime fmt: []const u8, args: anytype) TypeCheckError {
         self.last_error = std.fmt.allocPrint(self.allocator, fmt, args) catch null;
         return err;
     }
 
+    // Unwrap a variable's type, or error if it's a function signature.
     fn expectType(info: TypeInfo) !PipeType {
         return switch (info) {
             .variable => |v| v.pipe_type,
@@ -353,6 +357,7 @@ pub const TypeChecker = struct {
         };
     }
 
+    // Look up a type name (e.g. "Int") and return the corresponding PipeType.
     fn resolveTypeName(name: []const u8) !PipeType {
         if (typeNames.get(name)) |pipe_type| {
             return pipe_type;
