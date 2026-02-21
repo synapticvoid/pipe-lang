@@ -96,6 +96,15 @@ test "print" {
     });
 }
 
+test "return statement" {
+    try expectEval(.{
+        .{ "fn five() Int { return 5; } five();", "5" },
+        .{ "fn add(a: Int, b: Int) Int { return a + b; } add(1, 2);", "3" },
+        .{ "fn early(x: Int) Int { if (x > 0) { return x; } else { return 0; } } early(5);", "5" },
+        .{ "fn early(x: Int) Int { if (x > 0) { return x; } else { return 0; } } early(-1);", "0" },
+    });
+}
+
 test "function with closure" {
     try expectEval(.{
         .{ "var x = 10; fn addX(a: Int) Int { a + x; } addX(5);", "15" },

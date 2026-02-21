@@ -138,7 +138,23 @@ pub const Parser = struct {
             return .{ .expression = .{ .if_expr = try self.parseIf() } };
         }
 
+        if (self.check(.@"return")) {
+            return .{ .@"return" = try self.parseReturnStatement() };
+        }
+
         return .{ .expression = try self.parseExpressionStatement() };
+    }
+
+    fn parseReturnStatement(self: *Parser) ParseError!ast.Statement.Return {
+        const token = self.advance();
+        var value: ?ast.Expression = null;
+        if (!self.check(.semicolon)) {
+            value = try self.parseExpression();
+        }
+
+        _ = try self.consume(.semicolon, "Expect ';' after return value.");
+
+        return .{ .token = token, .value = value };
     }
 
     fn parseExpressionStatement(self: *Parser) ParseError!ast.Expression {

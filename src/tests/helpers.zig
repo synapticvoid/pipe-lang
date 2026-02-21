@@ -36,13 +36,9 @@ pub fn evaluate(source: []const u8, allocator: std.mem.Allocator) !EvalResult {
     for (statements) |statement| {
         switch (statement) {
             .expression => |expr| result = try interpreter.evaluate(expr),
-            .var_declaration => |decl| {
-                try interpreter.declareVar(decl);
+            else => {
+                try interpreter.execute(statement);
                 result = .unit;
-            },
-            .fn_declaration => |decl| {
-                try interpreter.declareFn(decl);
-                result = .null;
             },
         }
     }

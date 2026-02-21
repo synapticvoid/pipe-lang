@@ -11,6 +11,9 @@ pub const Statement = union(enum) {
     var_declaration: VarDeclaration,
     fn_declaration: FnDeclaration,
 
+    // Control flow
+    @"return": Return,
+
     pub const VarDeclaration = struct {
         name: Token,
         type_annotation: ?Token,
@@ -23,6 +26,14 @@ pub const Statement = union(enum) {
         params: []Param,
         return_type: ?Token,
         body: []const Statement,
+    };
+
+    pub const Return = struct {
+        // The 'return' keyword (for error reporting)
+        token: Token,
+
+        // null means `return;` (returns unit)
+        value: ?Expression,
     };
 };
 

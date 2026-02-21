@@ -17,11 +17,15 @@ pub const InterpreterError = error{
     UndefinedVariable,
     UnsupportedOperator,
     VariableAlreadyDefined,
+
+    // Control flow
+    ReturnSignal,
 };
 
 pub const Interpreter = struct {
     env: *Environment,
     ctx: RuntimeContext,
+    return_value: ?Value = null,
     allocator: std.mem.Allocator,
 
     pub fn init(ctx: RuntimeContext, allocator: std.mem.Allocator) !Interpreter {
@@ -46,13 +50,37 @@ pub const Interpreter = struct {
         }
     }
 
+    // NOTE: -- Statements
+
     pub fn execute(self: *Interpreter, statement: ast.Statement) !void {
         switch (statement) {
             .var_declaration => |decl| try self.declareVar(decl),
             .fn_declaration => |decl| try self.declareFn(decl),
             .expression => |expr| _ = try self.evaluate(expr),
+            .@"return" => |r| try self.executeReturn(r),
         }
     }
+
+    fn declareVar(self: *Interpreter, var_expr: ast.Statement.VarDeclaration) !void {
+        const value = if (var_expr.initializer) |init_expr| try self.evaluate(init_expr) else Value.null;
+        try self.env.define(var_expr.name.lexeme, value);
+    }
+
+    fn declareFn(self: *Interpreter, fn_expr: ast.Statement.FnDeclaration) !void {
+        const user_fn = Callable.UserFn{ .closure = self.env, .declaration = fn_expr };
+        try self.env.define(fn_expr.name.lexeme, .{ .function = .{ .user = user_fn } });
+    }
+
+    fn executeReturn(self: *Interpreter, return_expr: ast.Statement.Return) !void {
+        if (return_expr.value) |value| {
+            self.return_value = try self.evaluate(value);
+        } else {
+            self.return_value = .unit;
+        }
+        return error.ReturnSignal;
+    }
+
+    // NOTE: -- Expressions
 
     pub fn evaluate(self: *Interpreter, expr: ast.Expression) InterpreterError!Value {
         switch (expr) {
@@ -161,16 +189,6 @@ pub const Interpreter = struct {
         };
     }
 
-    pub fn declareVar(self: *Interpreter, var_expr: ast.Statement.VarDeclaration) !void {
-        const value = if (var_expr.initializer) |init_expr| try self.evaluate(init_expr) else Value.null;
-        try self.env.define(var_expr.name.lexeme, value);
-    }
-
-    pub fn declareFn(self: *Interpreter, fn_expr: ast.Statement.FnDeclaration) !void {
-        const user_fn = Callable.UserFn{ .closure = self.env, .declaration = fn_expr };
-        try self.env.define(fn_expr.name.lexeme, .{ .function = .{ .user = user_fn } });
-    }
-
     pub fn callFunction(self: *Interpreter, function: Callable.UserFn, args: []const Expression) !Value {
         // Create environment with params
         const env = try self.allocator.create(Environment);
@@ -181,9 +199,14 @@ pub const Interpreter = struct {
         }
 
         // Execute function's body
-        return try self.evaluateBlock(function.declaration.body, env);
+        return self.evaluateBlock(function.declaration.body, env) catch |err| switch (err) {
+            error.ReturnSignal => self.return_value orelse Value.unit,
+            else => return err,
+        };
     }
 };
+
+// NOTE: -- Helpers
 
 fn isTruthy(value: Value) bool {
     return switch (value) {
