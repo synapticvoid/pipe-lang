@@ -1,7 +1,5 @@
-const std = @import("std");
-const tokens = @import("tokens.zig");
+const Token = @import("tokens.zig").Token;
 const Callable = @import("callable.zig").Callable;
-const Token = tokens.Token;
 
 pub const Statement = union(enum) {
     // Expressions
@@ -14,9 +12,18 @@ pub const Statement = union(enum) {
     // Control flow
     @"return": Return,
 
+    // Errors
+    // error Name { Variant1, Variant2 }
+    error_declaration: ErrorDeclaration,
+
+    // error Name = A | B
+    error_union_declaration: ErrorUnionDeclaration,
+
+    // -------------------------------------------------------------------
+
     pub const VarDeclaration = struct {
         name: Token,
-        type_annotation: ?Token,
+        type_annotation: ?PipeTypeAnnotation,
         initializer: ?Expression,
         mutability: Mutability,
     };
@@ -24,7 +31,7 @@ pub const Statement = union(enum) {
     pub const FnDeclaration = struct {
         name: Token,
         params: []Param,
-        return_type: ?Token,
+        return_type: ?PipeTypeAnnotation,
         body: []const Statement,
     };
 
@@ -34,6 +41,17 @@ pub const Statement = union(enum) {
 
         // null means `return;` (returns unit)
         value: ?Expression,
+    };
+
+    pub const ErrorDeclaration = struct {
+        name: Token,
+        variants: []const Token,
+    };
+
+    pub const ErrorUnionDeclaration = struct {
+        name: Token,
+        // Existing error type names being unioned
+        members: []const Token,
     };
 };
 
@@ -55,6 +73,10 @@ pub const Expression = union(enum) {
     // Control flow
     if_expr: *If,
     block: *Block,
+
+    // Errors
+    try_expr: *Try,
+    catch_expr: *Catch,
 
     // -------------------------------------------------------------------
 
@@ -101,6 +123,25 @@ pub const Expression = union(enum) {
         operator: Token,
         right: Expression,
     };
+
+    // Errors
+    pub const Try = struct {
+        // 'try' keyword for error reporting
+        token: Token,
+        expression: Expression,
+    };
+
+    pub const Catch = struct {
+        // 'catch' keyword for error reporting
+        token: Token,
+
+        // The faillible left-hand side
+        expression: Expression,
+
+        // The |e| capture, null if omitted
+        binding: ?Token,
+        handler: Expression,
+    };
 };
 
 pub const Value = union(enum) {
@@ -140,5 +181,19 @@ pub const Mutability = enum {
 
 pub const Param = struct {
     name: Token,
-    type_annotation: Token,
+    type_annotation: PipeTypeAnnotation,
+};
+
+pub const PipeTypeAnnotation = union(enum) {
+    // int, string, MyType
+    named: Token,
+
+    // !T
+    inferred_error_union: *PipeTypeAnnotation,
+
+    explicit_error_union: struct {
+        // E in E!T
+        error_set: Token,
+        ok_type: *PipeTypeAnnotation,
+    },
 };

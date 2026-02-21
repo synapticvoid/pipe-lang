@@ -1,6 +1,7 @@
 # Pipe Lang
 
 Toy language implementation, ported from Python to Zig 0.15.2 as a learning exercise.
+- GitHub: https://github.com/synapticvoid/pipe-lang (owner: synapticvoid, repo: pipe-lang)
 
 ## Project structure
 

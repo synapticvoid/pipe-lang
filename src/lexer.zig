@@ -105,6 +105,9 @@ pub const Lexer = struct {
                     try self.addToken(.bang, null);
                 }
             },
+            '|' => {
+                try self.addToken(.pipe, null);
+            },
 
             // Whitespace
             ' ', '\r', '\t' => {},

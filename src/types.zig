@@ -1,4 +1,7 @@
-pub const PipeType = enum {
+const std = @import("std");
+const activeTag = std.meta.activeTag;
+
+pub const PipeType = union(enum) {
     int,
     float,
     bool,
@@ -6,19 +9,49 @@ pub const PipeType = enum {
     unit,
     any,
 
+    // Errors
+
+    // error MyError { V1, V2 }
+    error_set: []const u8,
+
+    // E!T or !T
+    error_union: struct {
+        // null == inferred (!T)
+        error_set: ?[]const u8,
+        ok_type: *PipeType,
+    },
+
     pub fn isNumeric(self: PipeType) bool {
-        return self == .int or self == .float;
+        switch (self) {
+            .int, .float => return true,
+            else => return false,
+        }
     }
 
     pub fn compatible(self: PipeType, other: PipeType) bool {
-        if (self == other) {
+        const self_tag = activeTag(self);
+        const other_tag = activeTag(other);
+        if (self_tag == other_tag) {
             return true;
         }
 
-        if (self == .any or other == .any) {
+        if (self_tag == .any or other_tag == .any) {
             return true;
         }
 
+        return false;
+    }
+
+    // Returns true of this type carries a possible error
+    pub fn isFallible(self: PipeType) bool {
+        return activeTag(self) == .error_union;
+    }
+
+    // Return true if self's error is a subset of other's (for try/catch checking)
+    pub fn isSubError(self: PipeType, other: PipeType) bool {
+        // TODO: Implement isSubError when we have the error set registry
+        _ = self;
+        _ = other;
         return false;
     }
 };

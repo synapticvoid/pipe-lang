@@ -23,6 +23,7 @@ pub const TokenType = enum {
     greater_equal,
     less,
     less_equal,
+    pipe,
 
     // Literals
     identifier,
@@ -31,17 +32,19 @@ pub const TokenType = enum {
 
     // Keywords
     @"and",
+    @"catch",
     @"const",
     @"else",
+    @"error",
     false,
     @"fn",
     @"for",
     @"if",
     null,
     @"or",
-    print,
     @"return",
     true,
+    @"try",
     @"var",
     @"while",
 
@@ -53,8 +56,10 @@ pub const TokenType = enum {
 
     const keywords = std.StaticStringMap(TokenType).initComptime(.{
         .{ "and", .@"and" },
+        .{ "catch", .@"catch" },
         .{ "const", .@"const" },
         .{ "else", .@"else" },
+        .{ "error", .@"error" },
         .{ "false", .false },
         .{ "fn", .@"fn" },
         .{ "for", .@"for" },
@@ -63,6 +68,7 @@ pub const TokenType = enum {
         .{ "or", .@"or" },
         .{ "return", .@"return" },
         .{ "true", .true },
+        .{ "try", .@"try" },
         .{ "var", .@"var" },
         .{ "while", .@"while" },
     });

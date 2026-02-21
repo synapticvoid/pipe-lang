@@ -3,7 +3,9 @@
     "allow": [
       "Bash(zig build:*)",
       "Bash(make test:*)",
-      "Bash(make build:*)"
+      "Bash(make build:*)",
+      "mcp__github__issue_read",
+      "Bash(git:*)"
     ]
   }
 }

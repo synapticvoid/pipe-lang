@@ -50,15 +50,31 @@ pub const Parser = struct {
             return .{ .fn_declaration = try self.parseFnDeclarationStatement() };
         }
 
+        if (self.match(&.{.@"error"})) {
+            const name = try self.consume(.identifier, "Expect error type name");
+
+            // error Name { V1, V2 }
+            if (self.match(&.{.lbrace})) {
+                return .{ .error_declaration = try self.parseErrorDeclarationStatement(name) };
+            }
+
+            // error Name = A | B
+            if (self.match(&.{.equal})) {
+                return .{ .error_union_declaration = try self.parseErrorUnionDeclarationStatement(name) };
+            }
+
+            return error.UnexpectedToken;
+        }
+
         return try self.parseStatement();
     }
 
     fn parseVarDeclarationStatement(self: *Parser, mutability: ast.Mutability) ParseError!ast.Statement.VarDeclaration {
         const name = try self.consume(.identifier, "Expect variable name");
 
-        var type_annotation: ?Token = null;
+        var type_annotation: ?ast.PipeTypeAnnotation = null;
         if (self.match(&.{.colon})) {
-            type_annotation = try self.consume(.identifier, "Expect type name");
+            type_annotation = try self.parseReturnType();
         }
 
         var initializer: ?ast.Expression = null;
@@ -96,9 +112,9 @@ pub const Parser = struct {
         }
         _ = try self.consume(.rparen, "Expect ')' after parameters.");
 
-        var return_type: ?Token = null;
-        if (self.check(.identifier)) {
-            return_type = self.advance();
+        var return_type: ?ast.PipeTypeAnnotation = null;
+        if (self.check(.identifier) or self.check(.bang)) {
+            return_type = try self.parseReturnType();
         }
 
         _ = try self.consume(.lbrace, "Expect '{' before function body.");
@@ -121,11 +137,42 @@ pub const Parser = struct {
     fn parseFnParam(self: *Parser) ParseError!ast.Param {
         const param_name = try self.consume(.identifier, "Expect parameter name");
         _ = try self.consume(.colon, "Expect ':' after parameter name");
-        const param_type = try self.consume(.identifier, "Expect parameter type");
+        const param_type = try self.parseReturnType();
 
         return .{
             .name = param_name,
             .type_annotation = param_type,
+        };
+    }
+
+    fn parseErrorDeclarationStatement(self: *Parser, name: Token) ParseError!ast.Statement.ErrorDeclaration {
+        var variants: std.ArrayList(Token) = .{};
+        if (!self.check(.rbrace)) {
+            try variants.append(self.allocator, try self.consume(.identifier, "Expect error variant name"));
+            while (self.match(&.{.comma})) {
+                try variants.append(self.allocator, try self.consume(.identifier, "Expect error variant name"));
+            }
+        }
+
+        _ = try self.consume(.rbrace, "Expect '}' after error variant list.");
+
+        return .{
+            .name = name,
+            .variants = variants.items,
+        };
+    }
+
+    fn parseErrorUnionDeclarationStatement(self: *Parser, name: Token) ParseError!ast.Statement.ErrorUnionDeclaration {
+        var members: std.ArrayList(Token) = .{};
+
+        try members.append(self.allocator, try self.consume(.identifier, "Expect error union member name"));
+        while (self.match(&.{.pipe})) {
+            try members.append(self.allocator, try self.consume(.identifier, "Expect error union member name"));
+        }
+
+        return .{
+            .name = name,
+            .members = members.items,
         };
     }
 
@@ -211,6 +258,19 @@ pub const Parser = struct {
     }
 
     fn parseUnary(self: *Parser) ParseError!ast.Expression {
+        if (self.match(&.{.@"try"})) {
+            const token = self.previous();
+            const expression = try self.parseUnary();
+
+            const try_expr = try self.allocator.create(ast.Expression.Try);
+            try_expr.* = .{
+                .token = token,
+                .expression = expression,
+            };
+
+            return .{ .try_expr = try_expr };
+        }
+
         if (self.match(&.{ TokenType.bang, TokenType.minus })) {
             const operator = self.previous();
             const right = try self.parseUnary();
@@ -222,28 +282,67 @@ pub const Parser = struct {
 
             return .{ .unary = unary };
         }
+
         return self.parseCall();
     }
 
     fn parseCall(self: *Parser) ParseError!ast.Expression {
         var expr = try self.parsePrimary();
 
-        while (self.match(&.{.lparen})) {
-            var args: std.ArrayList(ast.Expression) = .{};
-            if (!self.check(.rparen)) {
-                try args.append(self.allocator, try self.parseExpression());
-                while (self.match(&.{.comma})) {
-                    try args.append(self.allocator, try self.parseExpression());
-                }
+        while (true) {
+            // Function call
+            if (self.match(&.{.lparen})) {
+                expr = .{ .fn_call = try self.parseCallFn(expr) };
             }
-            _ = try self.consume(.rparen, "Expect ')' after arguments.");
 
-            const fn_call = try self.allocator.create(ast.Expression.FnCall);
-            fn_call.* = .{ .callee = expr, .args = args.items };
-            expr = .{ .fn_call = fn_call };
+            // Catch
+            else if (self.match(&.{.@"catch"})) {
+                expr = .{ .catch_expr = try self.parseCallCatch(expr) };
+            } else {
+                break;
+            }
         }
 
         return expr;
+    }
+
+    fn parseCallFn(self: *Parser, expr: ast.Expression) ParseError!*ast.Expression.FnCall {
+        var args: std.ArrayList(ast.Expression) = .{};
+        if (!self.check(.rparen)) {
+            try args.append(self.allocator, try self.parseExpression());
+            while (self.match(&.{.comma})) {
+                try args.append(self.allocator, try self.parseExpression());
+            }
+        }
+        _ = try self.consume(.rparen, "Expect ')' after arguments.");
+
+        const fn_call = try self.allocator.create(ast.Expression.FnCall);
+        fn_call.* = .{ .callee = expr, .args = args.items };
+        return fn_call;
+    }
+
+    fn parseCallCatch(self: *Parser, expr: ast.Expression) ParseError!*ast.Expression.Catch {
+        const token = self.previous();
+
+        // Parse optional |binding|
+        var binding: ?Token = null;
+        if (self.match(&.{.pipe})) {
+            binding = try self.consume(.identifier, "Expect binding name");
+            _ = try self.consume(.pipe, "Expect '|' after binding.");
+        }
+
+        // Parse handler expression
+        const handler = try self.parseExpression();
+
+        const catch_expr = try self.allocator.create(ast.Expression.Catch);
+        catch_expr.* = .{
+            .token = token,
+            .expression = expr,
+            .binding = binding,
+            .handler = handler,
+        };
+
+        return catch_expr;
     }
 
     fn parsePrimary(self: *Parser) ParseError!ast.Expression {
@@ -348,6 +447,31 @@ pub const Parser = struct {
         }
 
         return left;
+    }
+
+    fn parseReturnType(self: *Parser) ParseError!ast.PipeTypeAnnotation {
+        // Case 1: !T - leading bang means inferred error union
+        if (self.match(&.{.bang})) {
+            const ok_type = try self.allocator.create(ast.PipeTypeAnnotation);
+            ok_type.* = try self.parseReturnType();
+            return .{ .inferred_error_union = ok_type };
+        }
+
+        // Case 2 and 3: start with an identifier
+        const name = try self.consume(.identifier, "Expect type name.");
+
+        // Case 2: E!T - identier was the error set, parse the ok type
+        if (self.match(&.{.bang})) {
+            const ok_type = try self.allocator.create(ast.PipeTypeAnnotation);
+            ok_type.* = try self.parseReturnType();
+            return .{ .explicit_error_union = .{
+                .error_set = name,
+                .ok_type = ok_type,
+            } };
+        }
+
+        // Case 3: plain named type
+        return .{ .named = name };
     }
 
     // True when the current token is EOF.
