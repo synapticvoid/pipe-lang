@@ -60,6 +60,7 @@ pub const TypeEnvironment = struct {
 pub const TypeChecker = struct {
     env: *TypeEnvironment,
     expected_return_type: ?PipeType = null,
+    last_error: ?[]const u8 = null,
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) !TypeChecker {
@@ -106,38 +107,75 @@ pub const TypeChecker = struct {
 
     fn checkUnary(self: *TypeChecker, unary: *ast.Expression.Unary) !TypeInfo {
         const right_type = try expectType(try self.checkExpression(unary.right));
+        const op = unary.operator.lexeme;
+        const line = unary.operator.line;
+
         const result: PipeType = switch (unary.operator.type) {
-            .bang => if (right_type == .bool) .bool else return error.TypeMismatch,
-            .minus => if (right_type.isNumeric()) right_type else return error.TypeMismatch,
-            else => return error.TypeMismatch,
+            .bang => {
+                if (right_type != .bool) {
+                    return self.fail(error.TypeMismatch, "Type mismatch: cannot apply '!' to {s} at line {d}", .{ @tagName(right_type), line });
+                }
+                return .{ .variable = .{ .pipe_type = .bool, .mutability = .constant } };
+            },
+            .minus => {
+                if (!right_type.isNumeric()) {
+                    return self.fail(error.TypeMismatch, "Type mismatch: cannot apply '-' to {s} at line {d}", .{ @tagName(right_type), line });
+                }
+                return .{ .variable = .{ .pipe_type = right_type, .mutability = .constant } };
+            },
+            else => return self.fail(error.TypeMismatch, "Type mismatch: unsupported unary operator '{s}' at line {d}", .{ op, line }),
         };
+
         return .{ .variable = .{ .pipe_type = result, .mutability = .constant } };
     }
 
     fn checkBinary(self: *TypeChecker, binary: *ast.Expression.Binary) !TypeInfo {
         const left_type = try expectType(try self.checkExpression(binary.left));
         const right_type = try expectType(try self.checkExpression(binary.right));
+        const left_name = @tagName(left_type);
+        const right_name = @tagName(right_type);
+        const line = binary.operator.line;
+        const op = binary.operator.lexeme;
+
+        const op_err = "Type mismatch: cannot apply '{s}' to {s} and {s} at line {d}";
+
         const result: PipeType = switch (binary.operator.type) {
             // TODO: Handle float type
-            .plus, .minus, .star, .slash => if (left_type.isNumeric() and right_type.isNumeric()) .int else return error.TypeMismatch,
-            .equal_equal, .bang_equal => if (left_type.compatible(right_type)) .bool else return error.TypeMismatch,
-            .less, .less_equal, .greater, .greater_equal => if (left_type.isNumeric() and right_type.isNumeric()) .bool else return error.TypeMismatch,
-            else => return error.TypeMismatch,
+            .plus, .minus, .star, .slash => {
+                if (!left_type.isNumeric() or !right_type.isNumeric()) {
+                    return self.fail(error.TypeMismatch, op_err, .{ op, left_name, right_name, line });
+                }
+                return .{ .variable = .{ .pipe_type = .int, .mutability = .constant } };
+            },
+            .equal_equal, .bang_equal => {
+                if (!left_type.compatible(right_type)) {
+                    return self.fail(error.TypeMismatch, "Type mismatch: cannot compare {s} and {s} at line {d}", .{ left_name, right_name, line });
+                }
+                return .{ .variable = .{ .pipe_type = .bool, .mutability = .constant } };
+            },
+            .less, .less_equal, .greater, .greater_equal => {
+                if (!left_type.isNumeric() or !right_type.isNumeric()) {
+                    return self.fail(error.TypeMismatch, op_err, .{ op, left_name, right_name, line });
+                }
+                return .{ .variable = .{ .pipe_type = .bool, .mutability = .constant } };
+            },
+            else => return self.fail(error.TypeMismatch, "Type mismatch: unsupported operator '{s}' at line {d}", .{ op, line }),
         };
+
         return .{ .variable = .{ .pipe_type = result, .mutability = .constant } };
     }
 
     fn checkIf(self: *TypeChecker, if_expr: *ast.Expression.If) !TypeInfo {
         const condition_type = try expectType(try self.checkExpression(if_expr.condition));
         if (condition_type != .bool) {
-            return error.TypeMismatch;
+            return self.fail(error.TypeMismatch, "Type mismatch: if condition must be Bool, got {s}", .{@tagName(condition_type)});
         }
 
         const then_type = try expectType(try self.checkExpression(if_expr.then_branch));
         if (if_expr.else_branch) |else_branch| {
             const else_type = try expectType(try self.checkExpression(else_branch));
             if (!then_type.compatible(else_type)) {
-                return error.TypeMismatch;
+                return self.fail(error.TypeMismatch, "Type mismatch: if branches must have same type, got {s} and {s}", .{ @tagName(then_type), @tagName(else_type) });
             }
             return .{ .variable = .{ .pipe_type = then_type, .mutability = .constant } };
         }
@@ -149,16 +187,20 @@ pub const TypeChecker = struct {
         const info = try self.env.get(assign.token.lexeme);
         const v = switch (info) {
             .variable => |v_sig| v_sig,
-            .function => return error.TypeMismatch,
+            .function => return self.fail(error.TypeMismatch, "Type mismatch: cannot assign to function '{s}' at line {d}", .{ assign.token.lexeme, assign.token.line }),
         };
 
         if (v.mutability == .constant) {
-            return error.ConstReassignment;
+            return self.fail(error.ConstReassignment, "Cannot reassign constant '{s}' at line {d}", .{ assign.token.lexeme, assign.token.line });
         }
 
         const value_type = try expectType(try self.checkExpression(assign.value));
         if (!v.pipe_type.compatible(value_type)) {
-            return error.TypeMismatch;
+            return self.fail(error.TypeMismatch, "Type mismatch: expected {s}, got {s} at line {d}", .{
+                @tagName(v.pipe_type),
+                @tagName(value_type),
+                assign.token.line,
+            });
         }
 
         return .{ .variable = .{ .pipe_type = v.pipe_type, .mutability = v.mutability } };
@@ -168,17 +210,17 @@ pub const TypeChecker = struct {
         const callee_info = try self.checkExpression(call.callee);
         const sig = switch (callee_info) {
             .function => |s| s,
-            .variable => return error.TypeMismatch,
+            .variable => return self.fail(error.TypeMismatch, "Type mismatch: expression is not callable", .{}),
         };
 
         if (call.args.len != sig.param_types.len) {
-            return error.TypeMismatch;
+            return self.fail(error.TypeMismatch, "Wrong number of arguments: expected {d}, got {d}", .{ sig.param_types.len, call.args.len });
         }
 
-        for (call.args, sig.param_types) |arg, param_type| {
+        for (call.args, sig.param_types, 0..) |arg, param_type, i| {
             const arg_type = try expectType(try self.checkExpression(arg));
             if (!arg_type.compatible(param_type)) {
-                return error.TypeMismatch;
+                return self.fail(error.TypeMismatch, "Type mismatch: argument {d} expected {s}, got {s}", .{ i + 1, @tagName(param_type), @tagName(arg_type) });
             }
         }
 
@@ -188,6 +230,7 @@ pub const TypeChecker = struct {
     // --- Declaration type checking ---
 
     fn checkVarDeclaration(self: *TypeChecker, decl: ast.Statement.VarDeclaration) !void {
+        const line = decl.name.line;
         var resolved_type: PipeType = undefined;
 
         if (decl.initializer) |init_expr| {
@@ -196,7 +239,7 @@ pub const TypeChecker = struct {
             if (decl.type_annotation) |annotation| {
                 const annotated = try resolveTypeName(annotation.lexeme);
                 if (!inferred.compatible(annotated)) {
-                    return error.TypeMismatch;
+                    return self.fail(error.TypeMismatch, "Type mismatch: '{s}' declared as {s}, got {s} at line {d}", .{ decl.name.lexeme, @tagName(annotated), @tagName(inferred), line });
                 } else {
                     resolved_type = inferred;
                 }
@@ -206,7 +249,7 @@ pub const TypeChecker = struct {
         } else if (decl.type_annotation) |annotation| {
             resolved_type = try resolveTypeName(annotation.lexeme);
         } else {
-            return error.TypeMismatch;
+            return self.fail(error.TypeMismatch, "Type mismatch: '{s}' has no type annotation or initializer at line {d}", .{ decl.name.lexeme, line });
         }
 
         try self.env.define(decl.name.lexeme, .{ .variable = .{
@@ -251,7 +294,7 @@ pub const TypeChecker = struct {
         // Check the body
         const body_type = try self.checkBody(decl.body);
         if (!body_type.compatible(return_type)) {
-            return error.TypeMismatch;
+            return self.fail(error.TypeMismatch, "Type mismatch: function '{s}' should return {s}, got {s} at line {d}", .{ decl.name.lexeme, @tagName(return_type), @tagName(body_type), decl.name.line });
         }
 
         // Save the function signature to the *enclosing* environment
@@ -289,14 +332,19 @@ pub const TypeChecker = struct {
 
         if (self.expected_return_type) |expected| {
             if (!return_type.compatible(expected)) {
-                return error.TypeMismatch;
+                return self.fail(error.TypeMismatch, "Type mismatch: expected return type {s}, got {s} at line {d}", .{ @tagName(expected), @tagName(return_type), ret.token.line });
             }
         }
 
         return return_type;
     }
 
-    // --- Helpers ---
+    // NOTE: --- Helpers ---
+
+    fn fail(self: *TypeChecker, err: TypeCheckError, comptime fmt: []const u8, args: anytype) TypeCheckError {
+        self.last_error = std.fmt.allocPrint(self.allocator, fmt, args) catch null;
+        return err;
+    }
 
     fn expectType(info: TypeInfo) !PipeType {
         return switch (info) {

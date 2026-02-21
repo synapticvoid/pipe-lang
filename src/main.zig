@@ -12,8 +12,9 @@ fn run(source: []const u8, ctx: RuntimeContext, allocator: std.mem.Allocator) vo
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    doRun(source, ctx, arena.allocator()) catch |err| {
-        std.debug.print("Error: {}\n", .{err});
+    doRun(source, ctx, arena.allocator()) catch |err| switch (err) {
+        error.TypeMismatch, error.ConstReassignment, error.UndefinedVariable, error.UndefinedType => {},
+        else => std.debug.print("Error: {}\n", .{err}),
     };
 }
 fn doRun(source: []const u8, ctx: RuntimeContext, allocator: std.mem.Allocator) !void {
@@ -24,7 +25,14 @@ fn doRun(source: []const u8, ctx: RuntimeContext, allocator: std.mem.Allocator) 
     const statements = try parser.parse();
 
     var type_checker = try TypeChecker.init(allocator);
-    try type_checker.check(statements);
+    type_checker.check(statements) catch |err| {
+        if (type_checker.last_error) |msg| {
+            std.debug.print("{s}\n", .{msg});
+        } else {
+            std.debug.print("Type error: {}\n", .{err});
+        }
+        return err;
+    };
 
     var interpreter = try Interpreter.init(ctx, allocator);
     try interpreter.interpret(statements);

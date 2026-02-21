@@ -22,3 +22,8 @@ Toy language implementation, ported from Python to Zig 0.15.2 as a learning exer
 - Don't give full implementations; explain Zig-specific concepts at each step
 - Review their code when asked ("check", "critize") — focus on correctness and Zig idioms
 - Keep explanations concise and focused on what differs from Python
+
+## Coding style
+
+- Prefer guard clauses with early returns over nested conditions
+- Always use braces with `if` statements — no braceless `if` expressions
