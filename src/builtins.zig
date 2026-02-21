@@ -9,12 +9,18 @@ const Value = @import("ast.zig").Value;
 
 pub fn registerAll(env: *Environment) !void {
     try registerFn(env, "print", printFn);
+    try registerFn(env, "fail", failFn);
 }
 
 pub fn registerAllTypes(env: *TypeEnvironment) !void {
     try env.define("print", .{ .function = .{
         .param_types = &.{PipeType.any},
         .return_type = PipeType.unit,
+    } });
+
+    try env.define("fn", .{ .function = .{
+        .param_types = &.{PipeType.string},
+        .return_type = PipeType{ .error_set = "Error" },
     } });
 }
 
@@ -35,4 +41,8 @@ fn printFn(args: []const Value, ctx: RuntimeContext) Value {
     }
     ctx.writer.writeByte('\n') catch {};
     return .unit;
+}
+
+fn failFn(args: []const Value, _: RuntimeContext) Value {
+    return .{ .error_value = .{ .message = args[0].string } };
 }

@@ -59,8 +59,20 @@ pub const TypeEnvironment = struct {
 
 pub const TypeChecker = struct {
     env: *TypeEnvironment,
+    //
+    // Expected return type of the current function
     expected_return_type: ?PipeType = null,
+
+    // True if we're in a fallible function
+    in_fallible_fn: bool = false,
+
+    // Lookup table to match error uses to error declarations
+    // name -> error variant identifier
+    error_sets: std.StringHashMap([]const []const u8),
+
+    // Last type checker error message
     last_error: ?[]const u8 = null,
+
     allocator: std.mem.Allocator,
 
     // NOTE: -- Public API
@@ -70,7 +82,11 @@ pub const TypeChecker = struct {
         env.* = TypeEnvironment.init(null, allocator);
         try builtins.registerAllTypes(env);
 
-        return .{ .env = env, .allocator = allocator };
+        return .{
+            .env = env,
+            .error_sets = std.StringHashMap([]const []const u8).init(allocator),
+            .allocator = allocator,
+        };
     }
 
     pub fn check(self: *TypeChecker, statements: []const ast.Statement) TypeCheckError!void {
@@ -93,6 +109,8 @@ pub const TypeChecker = struct {
                     last_type = .unit;
                 },
                 .@"return" => |ret| last_type = try self.checkReturnStatement(ret),
+                .error_declaration => |decl| try self.registerErrorSet(decl),
+                .error_union_declaration => |decl| try self.registerErrorUnion(decl),
             }
         }
 
@@ -107,7 +125,7 @@ pub const TypeChecker = struct {
             const inferred = try expectType(try self.checkExpression(init_expr));
 
             if (decl.type_annotation) |annotation| {
-                const annotated = try resolveTypeName(annotation.lexeme);
+                const annotated = try self.resolveTypeAnnotation(annotation);
                 if (!inferred.compatible(annotated)) {
                     return self.fail(error.TypeMismatch, "Type mismatch: '{s}' declared as {s}, got {s} at line {d}", .{ decl.name.lexeme, @tagName(annotated), @tagName(inferred), line });
                 } else {
@@ -117,7 +135,7 @@ pub const TypeChecker = struct {
                 resolved_type = inferred;
             }
         } else if (decl.type_annotation) |annotation| {
-            resolved_type = try resolveTypeName(annotation.lexeme);
+            resolved_type = try self.resolveTypeAnnotation(annotation);
         } else {
             return self.fail(error.TypeMismatch, "Type mismatch: '{s}' has no type annotation or initializer at line {d}", .{ decl.name.lexeme, line });
         }
@@ -137,7 +155,7 @@ pub const TypeChecker = struct {
         const param_types = try self.allocator.alloc(PipeType, decl.params.len);
 
         for (decl.params, 0..) |param, i| {
-            const param_type = try resolveTypeName(param.type_annotation.lexeme);
+            const param_type = try self.resolveTypeAnnotation(param.type_annotation);
             try env.define(param.name.lexeme, .{ .variable = .{
                 .pipe_type = param_type,
                 .mutability = .mutable,
@@ -151,10 +169,15 @@ pub const TypeChecker = struct {
         defer self.env = previous;
 
         // Resolve return type
-        var return_type = PipeType.unit;
+        var return_type: PipeType = PipeType.unit;
         if (decl.return_type) |ret_type| {
-            return_type = try resolveTypeName(ret_type.lexeme);
+            return_type = try self.resolveTypeAnnotation(ret_type);
         }
+
+        // Determine is fallible for try/catch checks
+        const previous_fallible = self.in_fallible_fn;
+        self.in_fallible_fn = return_type.isFallible();
+        defer self.in_fallible_fn = previous_fallible;
 
         // Save a restore the previous return type, we might be in a nested function
         const previous_return_type = self.expected_return_type;
@@ -200,7 +223,12 @@ pub const TypeChecker = struct {
             .if_expr => |if_expr| self.checkIf(if_expr),
             .var_assignment => |assign| self.checkVarAssignment(assign),
             .fn_call => |call| self.checkFnCall(call),
-            else => error.TypeMismatch,
+            .try_expr => |try_expr| self.checkTry(try_expr),
+            .catch_expr => |catch_expr| self.checkCatch(catch_expr),
+            .block => |blk| {
+                const block_type = try self.checkBody(blk.statements);
+                return .{ .variable = .{ .pipe_type = block_type, .mutability = .constant } };
+            },
         };
     }
 
@@ -209,7 +237,7 @@ pub const TypeChecker = struct {
             .boolean => .bool,
             .int => .int,
             .string => .string,
-            .null, .unit => .unit,
+            .null, .unit, .error_value => .unit,
             .function => return error.TypeMismatch,
         };
         return .{ .variable = .{ .pipe_type = pipe_type, .mutability = .constant } };
@@ -341,6 +369,51 @@ pub const TypeChecker = struct {
         return .{ .variable = .{ .pipe_type = sig.return_type, .mutability = .constant } };
     }
 
+    fn checkTry(self: *TypeChecker, try_expr: *ast.Expression.Try) !TypeInfo {
+        const inner = try expectType(try self.checkExpression(try_expr.expression));
+        if (!inner.isFallible()) {
+            return self.fail(error.TypeMismatch, "Type mismatch: 'try' applied to non-fallible expression at line {d}", .{try_expr.token.line});
+        }
+
+        if (!self.in_fallible_fn) {
+            return self.fail(error.TypeMismatch, "Type mismatch: 'try' used outside a fallible function at line {d}", .{try_expr.token.line});
+        }
+
+        // Unwrap and return the ok type
+        return .{ .variable = .{ .pipe_type = inner.error_union.ok_type.*, .mutability = .constant } };
+    }
+
+    fn checkCatch(self: *TypeChecker, catch_expr: *ast.Expression.Catch) !TypeInfo {
+        // Check left-hand side to be a fallible type
+        const left = try expectType(try self.checkExpression(catch_expr.expression));
+        if (!left.isFallible()) {
+            return self.fail(error.TypeMismatch, "Type mismatch: 'catch' applied to non-fallible expression at line {d}", .{catch_expr.token.line});
+        }
+
+        // Dereference the ok type
+        const ok_type = left.error_union.ok_type.*;
+
+        // Used in the if, but Zig's defer fires in the block scope, not function scope
+        // We need to restore the environment when checkCatch() returns
+        const previous = self.env;
+        defer self.env = previous;
+
+        // If there's a binding |e|, introduce it in a new scope
+        if (catch_expr.binding) |binding| {
+            var inner_env = try self.allocator.create(TypeEnvironment);
+            inner_env.* = TypeEnvironment.init(self.env, self.allocator);
+            try inner_env.define(binding.lexeme, .{ .variable = .{ .pipe_type = .{
+                .error_set = left.error_union.error_set orelse "Error",
+            }, .mutability = .constant } });
+
+            self.env = inner_env;
+        }
+
+        _ = try self.checkExpression(catch_expr.handler);
+
+        return .{ .variable = .{ .pipe_type = ok_type, .mutability = .constant } };
+    }
+
     // NOTE: -- Helpers
 
     // Record an error message and return the error.
@@ -364,6 +437,55 @@ pub const TypeChecker = struct {
         } else {
             return error.UndefinedType;
         }
+    }
+
+    fn resolveTypeAnnotation(self: *TypeChecker, ann: ast.PipeTypeAnnotation) !PipeType {
+        return switch (ann) {
+            .named => |tok| try resolveTypeName(tok.lexeme),
+            .inferred_error_union => |inner| {
+                // Find the ok type
+                const ok_type = try self.allocator.create(PipeType);
+                ok_type.* = try self.resolveTypeAnnotation(inner.*);
+                return .{ .error_union = .{
+                    .error_set = null,
+                    .ok_type = ok_type,
+                } };
+            },
+            .explicit_error_union => |eu| {
+                // An explicit type was used, but we don't have the error set
+                if (!self.error_sets.contains(eu.error_set.lexeme)) {
+                    return error.UndefinedType;
+                }
+
+                // Find the ok type
+                const ok_type = try self.allocator.create(PipeType);
+                ok_type.* = try self.resolveTypeAnnotation(eu.ok_type.*);
+                return .{ .error_union = .{
+                    .error_set = eu.error_set.lexeme,
+                    .ok_type = ok_type,
+                } };
+            },
+        };
+    }
+
+    // Register an error set in the error registry
+    // error MyError = { Err1, Err2 } becomes { "MyError": ["Err1", "Err2"] }
+    fn registerErrorSet(self: *TypeChecker, decl: ast.Statement.ErrorDeclaration) !void {
+        const variants = try self.allocator.alloc([]const u8, decl.variants.len);
+        for (decl.variants, 0..) |variant, i| {
+            variants[i] = variant.lexeme;
+        }
+        try self.error_sets.put(decl.name.lexeme, variants);
+    }
+
+    // Register an error union in the error registry
+    // error MyError = Err1 | Err2 becomes { "MyError": ["Err1", "Err2"] }
+    fn registerErrorUnion(self: *TypeChecker, decl: ast.Statement.ErrorUnionDeclaration) !void {
+        const members = try self.allocator.alloc([]const u8, decl.members.len);
+        for (decl.members, 0..) |member, i| {
+            members[i] = member.lexeme;
+        }
+        try self.error_sets.put(decl.name.lexeme, members);
     }
 };
 

@@ -151,6 +151,7 @@ pub const Value = union(enum) {
     function: Callable,
     null,
     unit,
+    error_value: struct { message: []const u8 },
 
     pub fn asInt(self: Value) !f64 {
         switch (self) {
@@ -170,6 +171,7 @@ pub const Value = union(enum) {
             },
             .null => try writer.writeAll("null"),
             .unit => try writer.writeAll("unit"),
+            .error_value => |e| try writer.print("error<{s}>", .{e.message}),
         }
     }
 };

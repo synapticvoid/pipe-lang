@@ -39,6 +39,15 @@ pub const PipeType = union(enum) {
             return true;
         }
 
+        if (self_tag == .error_set and other_tag == .error_set) {
+            return true;
+        }
+
+        // T is compatible with E!T (returing an ok value from a fallible function)
+        if (other_tag == .error_union) {
+            return self.compatible(other.error_union.ok_type.*);
+        }
+
         return false;
     }
 
@@ -49,7 +58,8 @@ pub const PipeType = union(enum) {
 
     // Return true if self's error is a subset of other's (for try/catch checking)
     pub fn isSubError(self: PipeType, other: PipeType) bool {
-        // TODO: Implement isSubError when we have the error set registry
+        // TODO: Implement in TypeChecker (which holds the registry) and wire into
+        // checkTry/checkCatch to verify error set compatibility at try sites.
         _ = self;
         _ = other;
         return false;

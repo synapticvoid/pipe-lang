@@ -12,6 +12,7 @@ const Token = tokens.Token;
 const TokenType = tokens.TokenType;
 
 pub const InterpreterError = error{
+    NotImplemented,
     OutOfMemory,
     TypeError,
     UndefinedVariable,
@@ -20,12 +21,14 @@ pub const InterpreterError = error{
 
     // Control flow
     ReturnSignal,
+    ErrorSignal,
 };
 
 pub const Interpreter = struct {
     env: *Environment,
     ctx: RuntimeContext,
     return_value: ?Value = null,
+    error_value: ?Value = null,
     allocator: std.mem.Allocator,
 
     pub fn init(ctx: RuntimeContext, allocator: std.mem.Allocator) !Interpreter {
@@ -58,6 +61,8 @@ pub const Interpreter = struct {
             .fn_declaration => |decl| try self.executeFnDeclarationStatement(decl),
             .expression => |expr| _ = try self.evaluate(expr),
             .@"return" => |r| try self.executeReturnStatement(r),
+            .error_declaration => |decl| _ = decl,
+            .error_union_declaration => |decl| _ = decl,
         }
     }
 
@@ -161,6 +166,38 @@ pub const Interpreter = struct {
                     else => return InterpreterError.TypeError,
                 }
             },
+
+            // Errors
+            .try_expr => |e| {
+                const try_expr = try self.evaluate(e.expression);
+                return switch (try_expr) {
+                    .error_value => |_| {
+                        self.error_value = try_expr;
+                        return error.ErrorSignal;
+                    },
+                    else => try_expr,
+                };
+            },
+            .catch_expr => |e| {
+                const left = try self.evaluate(e.expression);
+                return switch (left) {
+                    .error_value => |_| {
+                        const previous = self.env;
+                        defer self.env = previous;
+
+                        if (e.binding) |binding| {
+                            const env = try self.allocator.create(Environment);
+                            env.* = Environment.init(self.env, self.allocator);
+
+                            try env.define(binding.lexeme, left);
+                            self.env = env;
+                        }
+
+                        return try self.evaluate(e.handler);
+                    },
+                    else => left,
+                };
+            },
         }
     }
 
@@ -205,6 +242,11 @@ pub const Interpreter = struct {
                 self.return_value = null;
                 return value;
             },
+            error.ErrorSignal => {
+                const value = self.error_value orelse Value.unit;
+                self.error_value = null;
+                return value;
+            },
             else => return err,
         };
     }
@@ -221,5 +263,6 @@ fn isTruthy(value: Value) bool {
         .int => value.int != 0,
         .function => true,
         .string => value.string.len > 0,
+        .error_value => false,
     };
 }

@@ -111,3 +111,40 @@ test "function with closure" {
         .{ "var x = 10; fn addX(a: Int) Int { a + x; } addX(5);", "15" },
     });
 }
+
+test "fail produces error value" {
+    try expectEval(.{
+        .{ "fail(\"oops\");", "error<oops>" },
+    });
+}
+
+test "catch handles error" {
+    try expectEval(.{
+        .{ "fail(\"oops\") catch { 42; };", "42" },
+        .{ "fail(\"oops\") catch { -1; };", "-1" },
+    });
+}
+
+test "catch with binding exposes error" {
+    try expectEval(.{
+        .{ "fail(\"oops\") catch |e| { e; };", "error<oops>" },
+    });
+}
+
+test "catch passes through ok value" {
+    try expectEval(.{
+        .{ "5 catch { -1; };", "5" },
+    });
+}
+
+test "try propagates error out of function" {
+    try expectEval(.{
+        .{ "fn f() !Int { return fail(\"oops\"); } fn g() !Int { return try f(); } g() catch { -1; };", "-1" },
+    });
+}
+
+test "try unwraps ok value" {
+    try expectEval(.{
+        .{ "fn f() !Int { return 5; } fn g() !Int { return try f(); } g() catch { -1; };", "5" },
+    });
+}

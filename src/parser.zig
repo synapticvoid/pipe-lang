@@ -290,14 +290,12 @@ pub const Parser = struct {
         var expr = try self.parsePrimary();
 
         while (true) {
-            // Function call
             if (self.match(&.{.lparen})) {
-                expr = .{ .fn_call = try self.parseCallFn(expr) };
-            }
-
-            // Catch
-            else if (self.match(&.{.@"catch"})) {
-                expr = .{ .catch_expr = try self.parseCallCatch(expr) };
+                const call = try self.parseCallFn(expr);
+                expr = .{ .fn_call = call };
+            } else if (self.match(&.{.@"catch"})) {
+                const catch_e = try self.parseCallCatch(expr);
+                expr = .{ .catch_expr = catch_e };
             } else {
                 break;
             }
