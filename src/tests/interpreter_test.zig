@@ -63,8 +63,9 @@ test "block expressions" {
 
 test "if expressions" {
     try expectEval(.{
+        .{ "var a = if true { 5; } else { -5; }; a;", "5" },
+        .{ "var a = if false { 5; } else { -5; }; a;", "-5" },
         .{ "var a = if (true) { 5; } else { -5; }; a;", "5" },
-        .{ "var a = if (false) { 5; } else { -5; }; a;", "-5" },
     });
 }
 
@@ -100,8 +101,8 @@ test "return statement" {
     try expectEval(.{
         .{ "fn five() Int { return 5; } five();", "5" },
         .{ "fn add(a: Int, b: Int) Int { return a + b; } add(1, 2);", "3" },
-        .{ "fn early(x: Int) Int { if (x > 0) { return x; } else { return 0; } } early(5);", "5" },
-        .{ "fn early(x: Int) Int { if (x > 0) { return x; } else { return 0; } } early(-1);", "0" },
+        .{ "fn early(x: Int) Int { if x > 0 { return x; } else { return 0; } } early(5);", "5" },
+        .{ "fn early(x: Int) Int { if x > 0 { return x; } else { return 0; } } early(-1);", "0" },
     });
 }
 

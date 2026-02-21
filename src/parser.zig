@@ -315,13 +315,13 @@ pub const Parser = struct {
     fn parseIf(self: *Parser) ParseError!*ast.Expression.If {
         _ = try self.consume(.@"if", "Expect 'if'.");
         // Parse condition
-        _ = try self.consume(.lparen, "Expect '(' after 'if'.");
         const condition = try self.parseExpression();
-        _ = try self.consume(.rparen, "Expect ')' after if condition.");
 
         // Parse then branch
-        // TODO handle optional braces!
+        // TODO: handle optional braces!
         const then_branch = try self.parseExpression();
+
+        // Parse else branch
         var else_branch: ?ast.Expression = null;
         if (self.match(&.{.@"else"})) {
             else_branch = try self.parseExpression();
