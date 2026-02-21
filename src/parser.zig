@@ -330,7 +330,7 @@ pub const Parser = struct {
         return if_expr;
     }
 
-    // NOTE: -- Utils
+    // NOTE: -- Helpers
 
     fn parseBinaryLeft(self: *Parser, parse_operand: *const fn (*Parser) ParseError!ast.Expression, operators: []const TokenType) ParseError!ast.Expression {
         var left = try parse_operand(self);

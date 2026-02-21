@@ -59,6 +59,7 @@ pub const TypeEnvironment = struct {
 
 pub const TypeChecker = struct {
     env: *TypeEnvironment,
+    expected_return_type: ?PipeType = null,
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) !TypeChecker {
@@ -70,13 +71,7 @@ pub const TypeChecker = struct {
     }
 
     pub fn check(self: *TypeChecker, statements: []const ast.Statement) TypeCheckError!void {
-        for (statements) |statement| {
-            switch (statement) {
-                .expression => |expr| _ = try self.checkExpression(expr),
-                .var_declaration => |decl| try self.checkVarDeclaration(decl),
-                .fn_declaration => |decl| try self.checkFunctionDeclaration(decl),
-            }
-        }
+        _ = try self.checkBody(statements);
     }
 
     // --- Expression type checking ---
@@ -221,9 +216,11 @@ pub const TypeChecker = struct {
     }
 
     fn checkFunctionDeclaration(self: *TypeChecker, decl: ast.Statement.FnDeclaration) !void {
+        // Create environment
         var env = try self.allocator.create(TypeEnvironment);
         env.* = TypeEnvironment.init(self.env, self.allocator);
 
+        // Save parameter types to env
         const param_types = try self.allocator.alloc(PipeType, decl.params.len);
 
         for (decl.params, 0..) |param, i| {
@@ -235,21 +232,68 @@ pub const TypeChecker = struct {
             param_types[i] = param_type;
         }
 
+        // Switch environments to check the function's body
         const previous = self.env;
         self.env = env;
         defer self.env = previous;
 
-        try self.check(decl.body);
-
+        // Resolve return type
         var return_type = PipeType.unit;
         if (decl.return_type) |ret_type| {
             return_type = try resolveTypeName(ret_type.lexeme);
         }
 
+        // Save a restore the previous return type, we might be in a nested function
+        const previous_return_type = self.expected_return_type;
+        self.expected_return_type = return_type;
+        defer self.expected_return_type = previous_return_type;
+
+        // Check the body
+        const body_type = try self.checkBody(decl.body);
+        if (!body_type.compatible(return_type)) {
+            return error.TypeMismatch;
+        }
+
+        // Save the function signature to the *enclosing* environment
         try previous.define(decl.name.lexeme, .{ .function = .{
             .param_types = param_types,
             .return_type = return_type,
         } });
+    }
+
+    fn checkBody(self: *TypeChecker, statements: []const ast.Statement) TypeCheckError!PipeType {
+        var last_type: PipeType = .unit;
+        for (statements) |statement| {
+            switch (statement) {
+                .expression => |expr| last_type = try expectType(try self.checkExpression(expr)),
+                .var_declaration => |decl| {
+                    try self.checkVarDeclaration(decl);
+                    last_type = .unit;
+                },
+                .fn_declaration => |decl| {
+                    try self.checkFunctionDeclaration(decl);
+                    last_type = .unit;
+                },
+                .@"return" => |ret| last_type = try self.checkReturn(ret),
+            }
+        }
+
+        return last_type;
+    }
+
+    fn checkReturn(self: *TypeChecker, ret: ast.Statement.Return) TypeCheckError!PipeType {
+        const return_type: PipeType = if (ret.value) |value|
+            try expectType(try self.checkExpression(value))
+        else
+            .unit;
+
+        if (self.expected_return_type) |expected| {
+            if (!return_type.compatible(expected)) {
+                return error.TypeMismatch;
+            }
+        }
+
+        return return_type;
     }
 
     // --- Helpers ---
@@ -275,4 +319,5 @@ const typeNames = std.StaticStringMap(PipeType).initComptime(.{
     .{ "Float", PipeType.float },
     .{ "Int", PipeType.int },
     .{ "String", PipeType.string },
+    .{ "Unit", PipeType.unit },
 });

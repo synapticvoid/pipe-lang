@@ -200,7 +200,11 @@ pub const Interpreter = struct {
 
         // Execute function's body
         return self.evaluateBlock(function.declaration.body, env) catch |err| switch (err) {
-            error.ReturnSignal => self.return_value orelse Value.unit,
+            error.ReturnSignal => {
+                const value = self.return_value orelse Value.unit;
+                self.return_value = null;
+                return value;
+            },
             else => return err,
         };
     }

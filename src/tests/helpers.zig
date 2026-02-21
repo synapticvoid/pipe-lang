@@ -22,6 +22,15 @@ pub const EvalResult = struct {
     }
 };
 
+pub fn typeCheck(source: []const u8, allocator: std.mem.Allocator) !void {
+    const tokens = try tokenize(source, allocator);
+    var parser = pipe.Parser.init(tokens, allocator);
+    const statements = try parser.parse();
+
+    var type_checker = try pipe.TypeChecker.init(allocator);
+    try type_checker.check(statements);
+}
+
 pub fn evaluate(source: []const u8, allocator: std.mem.Allocator) !EvalResult {
     const tokens = try tokenize(source, allocator);
     var parser = pipe.Parser.init(tokens, allocator);

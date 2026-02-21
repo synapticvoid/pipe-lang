@@ -36,7 +36,7 @@ Pipeline: **Source → Lexer → Parser → AST → `Type Checker` → Interpret
 - [x] Register built-in functions (`print(Any) → Unit`) in root environment
 - [x] `checkFnCall`: validate arg count, check each arg type against param type
 - [x] `checkFnCall`: return the function's declared return type
-- [ ] Validate return type in `checkFunctionDeclaration`
+- [x] Validate return type in `checkFunctionDeclaration`
 
 ## Step 5 — Wire into `main.zig`
 - [x] Run type checker between parser and interpreter

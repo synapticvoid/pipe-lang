@@ -7,6 +7,7 @@ pub const Lexer = @import("lexer.zig").Lexer;
 pub const Parser = @import("parser.zig").Parser;
 pub const RuntimeContext = @import("runtime.zig").RuntimeContext;
 pub const Token = @import("tokens.zig").Token;
+pub const TypeChecker = @import("type_checker.zig").TypeChecker;
 
 pub fn bufferedPrint() !void {
     // Stdout is for the actual output of your application, for example if you
