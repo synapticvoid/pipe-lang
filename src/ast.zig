@@ -1,4 +1,5 @@
-const Token = @import("tokens.zig").Token;
+const std = @import("std");
+const Token = @import("token.zig").Token;
 const Callable = @import("callable.zig").Callable;
 
 pub const Statement = union(enum) {
@@ -135,7 +136,7 @@ pub const Expression = union(enum) {
         // 'catch' keyword for error reporting
         token: Token,
 
-        // The faillible left-hand side
+        // The fallible left-hand side
         expression: Expression,
 
         // The |e| capture, null if omitted
@@ -145,7 +146,7 @@ pub const Expression = union(enum) {
 };
 
 pub const Value = union(enum) {
-    int: f64,
+    int: i64,
     string: []const u8,
     boolean: bool,
     function: Callable,
@@ -153,21 +154,31 @@ pub const Value = union(enum) {
     unit,
     error_value: struct { message: []const u8 },
 
-    pub fn asInt(self: Value) !f64 {
+    pub fn asInt(self: Value) !i64 {
         switch (self) {
             .int => |n| return n,
             else => return error.TypeError,
         }
     }
 
-    pub fn format(self: Value, writer: anytype) !void {
+    pub fn isTruthy(self: Value) bool {
+        return switch (self) {
+            .null, .unit, .error_value => false,
+            .boolean => |b| b,
+            .int => |n| n != 0,
+            .function => true,
+            .string => |s| s.len > 0,
+        };
+    }
+
+    pub fn format(self: Value, writer: *std.Io.Writer) std.Io.Writer.Error!void {
         switch (self) {
             .int => |n| try writer.print("{d}", .{n}),
             .string => |s| try writer.print("\"{s}\"", .{s}),
             .boolean => |b| try writer.print("{any}", .{b}),
             .function => |f| switch (f) {
                 .user => |u| try writer.print("fn<{s}>", .{u.declaration.name.lexeme}),
-                .builtin => |b| try writer.print("fn<{s}>", .{b.name}),
+                .builtin => |bi| try writer.print("fn<{s}>", .{bi.name}),
             },
             .null => try writer.writeAll("null"),
             .unit => try writer.writeAll("unit"),

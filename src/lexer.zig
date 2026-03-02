@@ -1,9 +1,9 @@
 const std = @import("std");
 const isDigit = std.ascii.isDigit;
 
-const tok = @import("tokens.zig");
-const Token = tok.Token;
-const TokenType = tok.TokenType;
+const token = @import("token.zig");
+const Token = token.Token;
+const TokenType = token.TokenType;
 
 pub const Lexer = struct {
     source: []const u8,

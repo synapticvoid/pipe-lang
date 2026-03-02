@@ -12,12 +12,12 @@ fn run(source: []const u8, ctx: RuntimeContext, allocator: std.mem.Allocator) vo
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    doRun(source, ctx, arena.allocator()) catch |err| switch (err) {
+    runSource(source, ctx, arena.allocator()) catch |err| switch (err) {
         error.TypeMismatch, error.ConstReassignment, error.UndefinedVariable, error.UndefinedType => {},
         else => std.debug.print("Error: {}\n", .{err}),
     };
 }
-fn doRun(source: []const u8, ctx: RuntimeContext, allocator: std.mem.Allocator) !void {
+fn runSource(source: []const u8, ctx: RuntimeContext, allocator: std.mem.Allocator) !void {
     var lexer = Lexer.init(source, allocator);
     const tokens = try lexer.tokenize();
 

@@ -1,9 +1,7 @@
 const std = @import("std");
 
 const ast = @import("ast.zig");
-const tok = @import("tokens.zig");
 const Value = ast.Value;
-const Token = tok.Token;
 
 pub const Environment = struct {
     enclosing: ?*Environment,
@@ -23,10 +21,11 @@ pub const Environment = struct {
     }
 
     pub fn define(self: *Environment, name: []const u8, value: Value) !void {
-        const existing = try self.values.fetchPut(name, value);
-        if (existing != null) {
+        const gop = try self.values.getOrPut(name);
+        if (gop.found_existing) {
             return error.VariableAlreadyDefined;
         }
+        gop.value_ptr.* = value;
     }
 
     pub fn get(self: *Environment, name: []const u8) !Value {

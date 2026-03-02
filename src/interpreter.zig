@@ -1,15 +1,15 @@
 const std = @import("std");
 const ast = @import("ast.zig");
 const builtins = @import("builtins.zig");
-const tokens = @import("tokens.zig");
+const token = @import("token.zig");
 
 const RuntimeContext = @import("runtime.zig").RuntimeContext;
 const Environment = @import("environment.zig").Environment;
 const Callable = @import("callable.zig").Callable;
 const Expression = ast.Expression;
 const Value = ast.Value;
-const Token = tokens.Token;
-const TokenType = tokens.TokenType;
+const Token = token.Token;
+const TokenType = token.TokenType;
 
 pub const InterpreterError = error{
     NotImplemented,
@@ -103,7 +103,7 @@ pub const Interpreter = struct {
             .unary => |e| {
                 const right = try self.evaluate(e.right);
                 switch (e.operator.type) {
-                    .bang => return Value{ .boolean = !isTruthy(right) },
+                    .bang => return Value{ .boolean = !right.isTruthy() },
                     .minus => return Value{ .int = -(try right.asInt()) },
                     else => return InterpreterError.UnsupportedOperator,
                 }
@@ -119,7 +119,7 @@ pub const Interpreter = struct {
                     .plus => return Value{ .int = left_val + right_val },
                     .minus => return Value{ .int = left_val - right_val },
                     .star => return Value{ .int = left_val * right_val },
-                    .slash => return Value{ .int = left_val / right_val },
+                    .slash => return Value{ .int = @divTrunc(left_val, right_val) },
 
                     .equal_equal => return Value{ .boolean = left_val == right_val },
                     .bang_equal => return Value{ .boolean = left_val != right_val },
@@ -141,7 +141,7 @@ pub const Interpreter = struct {
 
             .if_expr => |e| {
                 const cond = try self.evaluate(e.condition);
-                if (isTruthy(cond)) {
+                if (cond.isTruthy()) {
                     return try self.evaluate(e.then_branch);
                 } else if (e.else_branch) |else_expr| {
                     return try self.evaluate(else_expr);
@@ -251,18 +251,3 @@ pub const Interpreter = struct {
         };
     }
 };
-
-// NOTE: -- Helpers
-
-// Return whether a value is considered true in boolean context.
-fn isTruthy(value: Value) bool {
-    return switch (value) {
-        .null => false,
-        .unit => false,
-        .boolean => value.boolean,
-        .int => value.int != 0,
-        .function => true,
-        .string => value.string.len > 0,
-        .error_value => false,
-    };
-}

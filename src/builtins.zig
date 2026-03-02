@@ -18,7 +18,7 @@ pub fn registerAllTypes(env: *TypeEnvironment) !void {
         .return_type = PipeType.unit,
     } });
 
-    try env.define("fn", .{ .function = .{
+    try env.define("fail", .{ .function = .{
         .param_types = &.{PipeType.string},
         .return_type = PipeType{ .error_set = "Error" },
     } });
@@ -36,7 +36,7 @@ fn printFn(args: []const Value, ctx: RuntimeContext) Value {
         if (i > 0) ctx.writer.writeByte(' ') catch {};
         switch (arg) {
             .string => |s| ctx.writer.writeAll(s) catch {},
-            else => arg.format(ctx.writer) catch {},
+            else => ctx.writer.print("{f}", .{arg}) catch {},
         }
     }
     ctx.writer.writeByte('\n') catch {};

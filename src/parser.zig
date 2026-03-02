@@ -1,8 +1,8 @@
 const std = @import("std");
-const tok = @import("tokens.zig");
+const token = @import("token.zig");
 const ast = @import("ast.zig");
-const Token = tok.Token;
-const TokenType = tok.TokenType;
+const Token = token.Token;
+const TokenType = token.TokenType;
 
 const ParseError = error{
     UnexpectedToken,
@@ -176,6 +176,31 @@ pub const Parser = struct {
         };
     }
 
+    fn parseReturnType(self: *Parser) ParseError!ast.PipeTypeAnnotation {
+        // Case 1: !T - leading bang means inferred error union
+        if (self.match(&.{.bang})) {
+            const ok_type = try self.allocator.create(ast.PipeTypeAnnotation);
+            ok_type.* = try self.parseReturnType();
+            return .{ .inferred_error_union = ok_type };
+        }
+
+        // Case 2 and 3: start with an identifier
+        const name = try self.consume(.identifier, "Expect type name.");
+
+        // Case 2: E!T - identifier was the error set, parse the ok type
+        if (self.match(&.{.bang})) {
+            const ok_type = try self.allocator.create(ast.PipeTypeAnnotation);
+            ok_type.* = try self.parseReturnType();
+            return .{ .explicit_error_union = .{
+                .error_set = name,
+                .ok_type = ok_type,
+            } };
+        }
+
+        // Case 3: plain named type
+        return .{ .named = name };
+    }
+
     // NOTE: -- Statements
 
     fn parseStatement(self: *Parser) ParseError!ast.Statement {
@@ -195,7 +220,7 @@ pub const Parser = struct {
     }
 
     fn parseReturnStatement(self: *Parser) ParseError!ast.Statement.Return {
-        const token = self.advance();
+        const keyword = self.advance();
         var value: ?ast.Expression = null;
         if (!self.check(.semicolon)) {
             value = try self.parseExpression();
@@ -203,7 +228,7 @@ pub const Parser = struct {
 
         _ = try self.consume(.semicolon, "Expect ';' after return value.");
 
-        return .{ .token = token, .value = value };
+        return .{ .token = keyword, .value = value };
     }
 
     fn parseExpressionStatement(self: *Parser) ParseError!ast.Expression {
@@ -259,12 +284,12 @@ pub const Parser = struct {
 
     fn parseUnary(self: *Parser) ParseError!ast.Expression {
         if (self.match(&.{.@"try"})) {
-            const token = self.previous();
+            const keyword = self.previous();
             const expression = try self.parseUnary();
 
             const try_expr = try self.allocator.create(ast.Expression.Try);
             try_expr.* = .{
-                .token = token,
+                .token = keyword,
                 .expression = expression,
             };
 
@@ -291,10 +316,10 @@ pub const Parser = struct {
 
         while (true) {
             if (self.match(&.{.lparen})) {
-                const call = try self.parseCallFn(expr);
+                const call = try self.parseCallArguments(expr);
                 expr = .{ .fn_call = call };
             } else if (self.match(&.{.@"catch"})) {
-                const catch_e = try self.parseCallCatch(expr);
+                const catch_e = try self.parseCatchSuffix(expr);
                 expr = .{ .catch_expr = catch_e };
             } else {
                 break;
@@ -304,7 +329,7 @@ pub const Parser = struct {
         return expr;
     }
 
-    fn parseCallFn(self: *Parser, expr: ast.Expression) ParseError!*ast.Expression.FnCall {
+    fn parseCallArguments(self: *Parser, expr: ast.Expression) ParseError!*ast.Expression.FnCall {
         var args: std.ArrayList(ast.Expression) = .{};
         if (!self.check(.rparen)) {
             try args.append(self.allocator, try self.parseExpression());
@@ -319,8 +344,8 @@ pub const Parser = struct {
         return fn_call;
     }
 
-    fn parseCallCatch(self: *Parser, expr: ast.Expression) ParseError!*ast.Expression.Catch {
-        const token = self.previous();
+    fn parseCatchSuffix(self: *Parser, expr: ast.Expression) ParseError!*ast.Expression.Catch {
+        const keyword = self.previous();
 
         // Parse optional |binding|
         var binding: ?Token = null;
@@ -334,7 +359,7 @@ pub const Parser = struct {
 
         const catch_expr = try self.allocator.create(ast.Expression.Catch);
         catch_expr.* = .{
-            .token = token,
+            .token = keyword,
             .expression = expr,
             .binding = binding,
             .handler = handler,
@@ -348,7 +373,7 @@ pub const Parser = struct {
             // Literals
             .int => {
                 _ = self.advance();
-                const value = try std.fmt.parseFloat(f64, self.previous().lexeme);
+                const value = std.fmt.parseInt(i64, self.previous().lexeme, 10) catch return error.InvalidCharacter;
                 return ast.Expression{ .literal = .{ .value = .{ .int = value } } };
             },
             .string => {
@@ -445,31 +470,6 @@ pub const Parser = struct {
         }
 
         return left;
-    }
-
-    fn parseReturnType(self: *Parser) ParseError!ast.PipeTypeAnnotation {
-        // Case 1: !T - leading bang means inferred error union
-        if (self.match(&.{.bang})) {
-            const ok_type = try self.allocator.create(ast.PipeTypeAnnotation);
-            ok_type.* = try self.parseReturnType();
-            return .{ .inferred_error_union = ok_type };
-        }
-
-        // Case 2 and 3: start with an identifier
-        const name = try self.consume(.identifier, "Expect type name.");
-
-        // Case 2: E!T - identier was the error set, parse the ok type
-        if (self.match(&.{.bang})) {
-            const ok_type = try self.allocator.create(ast.PipeTypeAnnotation);
-            ok_type.* = try self.parseReturnType();
-            return .{ .explicit_error_union = .{
-                .error_set = name,
-                .ok_type = ok_type,
-            } };
-        }
-
-        // Case 3: plain named type
-        return .{ .named = name };
     }
 
     // True when the current token is EOF.

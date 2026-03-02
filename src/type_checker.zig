@@ -4,7 +4,7 @@ const ast = @import("ast.zig");
 const builtins = @import("builtins.zig");
 const types = @import("types.zig");
 const PipeType = types.PipeType;
-const Token = @import("tokens.zig").Token;
+const Token = @import("token.zig").Token;
 
 pub const TypeInfo = union(enum) {
     variable: VarSignature,
@@ -148,7 +148,7 @@ pub const TypeChecker = struct {
 
     fn checkFnDeclarationStatement(self: *TypeChecker, decl: ast.Statement.FnDeclaration) !void {
         // Create environment
-        var env = try self.allocator.create(TypeEnvironment);
+        const env = try self.allocator.create(TypeEnvironment);
         env.* = TypeEnvironment.init(self.env, self.allocator);
 
         // Save parameter types to env
@@ -252,7 +252,7 @@ pub const TypeChecker = struct {
         const op = unary.operator.lexeme;
         const line = unary.operator.line;
 
-        const result: PipeType = switch (unary.operator.type) {
+        return switch (unary.operator.type) {
             .bang => {
                 if (right_type != .bool) {
                     return self.fail(error.TypeMismatch, "Type mismatch: cannot apply '!' to {s} at line {d}", .{ @tagName(right_type), line });
@@ -267,8 +267,6 @@ pub const TypeChecker = struct {
             },
             else => return self.fail(error.TypeMismatch, "Type mismatch: unsupported unary operator '{s}' at line {d}", .{ op, line }),
         };
-
-        return .{ .variable = .{ .pipe_type = result, .mutability = .constant } };
     }
 
     fn checkBinary(self: *TypeChecker, binary: *ast.Expression.Binary) !TypeInfo {
@@ -281,7 +279,7 @@ pub const TypeChecker = struct {
 
         const op_err = "Type mismatch: cannot apply '{s}' to {s} and {s} at line {d}";
 
-        const result: PipeType = switch (binary.operator.type) {
+        return switch (binary.operator.type) {
             // TODO: Handle float type
             .plus, .minus, .star, .slash => {
                 if (!left_type.isNumeric() or !right_type.isNumeric()) {
@@ -303,8 +301,6 @@ pub const TypeChecker = struct {
             },
             else => return self.fail(error.TypeMismatch, "Type mismatch: unsupported operator '{s}' at line {d}", .{ op, line }),
         };
-
-        return .{ .variable = .{ .pipe_type = result, .mutability = .constant } };
     }
 
     fn checkIf(self: *TypeChecker, if_expr: *ast.Expression.If) !TypeInfo {
@@ -432,12 +428,20 @@ pub const TypeChecker = struct {
 
     // Look up a type name (e.g. "Int") and return the corresponding PipeType.
     fn resolveTypeName(name: []const u8) !PipeType {
-        if (typeNames.get(name)) |pipe_type| {
+        if (type_names.get(name)) |pipe_type| {
             return pipe_type;
         } else {
             return error.UndefinedType;
         }
     }
+
+    const type_names = std.StaticStringMap(PipeType).initComptime(.{
+        .{ "Bool", PipeType.bool },
+        .{ "Float", PipeType.float },
+        .{ "Int", PipeType.int },
+        .{ "String", PipeType.string },
+        .{ "Unit", PipeType.unit },
+    });
 
     fn resolveTypeAnnotation(self: *TypeChecker, ann: ast.PipeTypeAnnotation) !PipeType {
         return switch (ann) {
@@ -488,11 +492,3 @@ pub const TypeChecker = struct {
         try self.error_sets.put(decl.name.lexeme, members);
     }
 };
-
-const typeNames = std.StaticStringMap(PipeType).initComptime(.{
-    .{ "Bool", PipeType.bool },
-    .{ "Float", PipeType.float },
-    .{ "Int", PipeType.int },
-    .{ "String", PipeType.string },
-    .{ "Unit", PipeType.unit },
-});
