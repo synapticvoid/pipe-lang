@@ -119,7 +119,7 @@ pub const TypeChecker = struct {
                 .error_declaration => |decl| try self.registerErrorSet(decl),
                 .error_union_declaration => |decl| try self.registerErrorUnion(decl),
                 .struct_declaration => |decl| try self.checkStructDeclarationStatement(decl),
-                .union_declaration => |decl| try self.checkUnionDeclarationStatement(decl),
+                .enum_declaration => |decl| try self.checkEnumDeclarationStatement(decl),
             }
         }
 
@@ -135,7 +135,7 @@ pub const TypeChecker = struct {
 
             if (decl.type_annotation) |annotation| {
                 const annotated = try self.resolveTypeAnnotation(annotation);
-                if (!inferred.compatible(annotated) and !self.isNestedUnionCoercible(inferred, annotated)) {
+                if (!inferred.compatible(annotated) and !self.isNestedEnumCoercible(inferred, annotated)) {
                     return self.fail(error.TypeMismatch, "Type mismatch: '{s}' declared as {s}, got {s} at line {d}", .{ decl.name.lexeme, @tagName(annotated), @tagName(inferred), line });
                 } else {
                     resolved_type = inferred;
@@ -235,20 +235,20 @@ pub const TypeChecker = struct {
         try self.registerConstructor(decl.name.lexeme, resolved_fields, .{ .struct_type = decl.name.lexeme });
     }
 
-    fn checkUnionDeclarationStatement(self: *TypeChecker, decl: ast.Statement.UnionDeclaration) !void {
+    fn checkEnumDeclarationStatement(self: *TypeChecker, decl: ast.Statement.EnumDeclaration) !void {
         var resolved_variants = try self.allocator.alloc(types.VariantTypeInfo, decl.variants.len);
         for (decl.variants, 0..) |variant, i| {
-            // If this is a zero-field variant whose name matches an existing union,
-            // treat it as a nested union: synthesize a single field wrapping the inner type.
+            // If this is a zero-field variant whose name matches an existing enum,
+            // treat it as a nested enum: synthesize a single field wrapping the inner type.
             const fields: []types.FieldInfo = blk: {
                 if (variant.fields.len != 0) break :blk null;
                 const info = self.type_registry.get(variant.name.lexeme) orelse break :blk null;
                 switch (info) {
-                    .union_type => {
+                    .enum_type => {
                         const synthetic = try self.allocator.alloc(types.FieldInfo, 1);
                         synthetic[0] = .{
                             .name = variant.name.lexeme,
-                            .pipe_type = .{ .union_type = variant.name.lexeme },
+                            .pipe_type = .{ .enum_type = variant.name.lexeme },
                             .mutability = .constant,
                         };
                         break :blk synthetic;
@@ -258,7 +258,7 @@ pub const TypeChecker = struct {
             } orelse try self.resolveFields(variant.fields);
 
             const variant_name = try utils.qualifiedName(self.allocator, decl.name.lexeme, variant.name.lexeme);
-            try self.registerConstructor(variant_name, fields, .{ .union_type = decl.name.lexeme });
+            try self.registerConstructor(variant_name, fields, .{ .enum_type = decl.name.lexeme });
 
             resolved_variants[i] = .{
                 .name = variant.name.lexeme,
@@ -266,7 +266,7 @@ pub const TypeChecker = struct {
             };
         }
 
-        try self.type_registry.put(decl.name.lexeme, .{ .union_type = .{
+        try self.type_registry.put(decl.name.lexeme, .{ .enum_type = .{
             .variants = resolved_variants,
         } });
     }
@@ -464,7 +464,7 @@ pub const TypeChecker = struct {
 
         const struct_name = switch (obj_type) {
             .struct_type => |name| name,
-            .union_type => |name| name,
+            .enum_type => |name| name,
             else => return error.TypeMismatch,
         };
 
@@ -480,7 +480,7 @@ pub const TypeChecker = struct {
 
                 return self.fail(error.UndefinedField, "Undefined field '{s}'", .{field_access.name.lexeme});
             },
-            .union_type => |u| {
+            .enum_type => |u| {
                 // Look for variant field names (nested for)
                 for (u.variants) |variant| {
                     for (variant.fields) |field| {
@@ -565,7 +565,7 @@ pub const TypeChecker = struct {
         if (self.type_registry.get(name)) |info| {
             return switch (info) {
                 .struct_type => .{ .struct_type = name },
-                .union_type => .{ .union_type = name },
+                .enum_type => .{ .enum_type = name },
             };
         }
 
@@ -635,19 +635,19 @@ pub const TypeChecker = struct {
     }
 
     // Returns true if `from` can be implicitly coerced into `to`.
-    // This happens when `to` is a composed union that has `from` as a nested variant,
-    // e.g. `union AnyRole { StaffRole, Guest }` makes StaffRole coercible to AnyRole.
-    fn isNestedUnionCoercible(self: *TypeChecker, from: PipeType, to: PipeType) bool {
-        // Both must be union types — primitives and structs don't participate in this coercion.
-        if (from != .union_type or to != .union_type) {
+    // This happens when `to` is a composed enum that has `from` as a nested variant,
+    // e.g. `enum AnyRole { StaffRole, Guest }` makes StaffRole coercible to AnyRole.
+    fn isNestedEnumCoercible(self: *TypeChecker, from: PipeType, to: PipeType) bool {
+        // Both must be enum types — primitives and structs don't participate in this coercion.
+        if (from != .enum_type or to != .enum_type) {
             return false;
         }
 
-        // Look up the target union in the registry to get its variant list.
-        const to_name = to.union_type;
+        // Look up the target enum in the registry to get its variant list.
+        const to_name = to.enum_type;
         const info = self.type_registry.get(to_name) orelse return false;
         const to_info = switch (info) {
-            .union_type => |u| u,
+            .enum_type => |u| u,
             else => return false,
         };
 

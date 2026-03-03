@@ -7,13 +7,13 @@ Each phase is self-contained and testable.
 
 ### Phase 1: Lexer foundation ✅
 - [x] Add `struct` keyword token
-- [x] Add `union` keyword token
+- [x] Add `union` keyword token (renamed to `enum` in Phase 3.5)
 - [x] Add `case` keyword token
 - [x] Add `when` keyword token (reserved for future pattern matching)
 - [x] Add `self` keyword token (reserved for instance methods)
 - [x] Add `Self` keyword token (reserved for self type annotation)
 - [x] Add `.` (dot) single-character token
-- [x] Tests: lex `struct`, `union`, `case`, `when`, `self`, `Self`, `.`
+- [x] Tests: lex `struct`, `union`, `case`, `when`, `self`, `Self`, `.` (update `union` → `enum` in Phase 3.5)
 
 ### Phase 2: Struct (short form, no methods) ✅
 - [x] AST: `Statement.struct_declaration` (name, fields with mutability, case flag)
@@ -30,7 +30,7 @@ Each phase is self-contained and testable.
 - [x] Plain `struct`: identity `==` and `toString` → `<Session>`
 - [x] Tests: declare, construct, access fields, print, compare (both case and plain)
 
-### Phase 3: Union ✅
+### Phase 3: Enum (née union) ✅
 - [x] AST: `Statement.union_declaration` (name, variants with fields as non-optional slice)
 - [x] Parser: parse `union Role { Admin, Member(const team: String), Guest }`
 - [x] Parser: parse `Role.Member("engineering")` as qualified construction (reuses dot access from Phase 2)
@@ -41,17 +41,27 @@ Each phase is self-contained and testable.
 - [x] Union composition: `union AnyRole { StaffRole, Guest }` (nests existing unions as variants)
 - [x] Tests: declare, construct, access variant fields, compare, compose unions
 
+### Phase 3.5: Rename `union` → `enum` ✅
+- [x] Lexer: replace `union` keyword token with `enum`
+- [x] AST: rename `union_declaration` → `enum_declaration`, `union_type` → `enum_type` throughout
+- [x] Parser, type checker, interpreter: mechanical rename to match
+- [x] Types: rename `PipeType.union_type` → `PipeType.enum_type`, `UnionTypeInfo` → `EnumTypeInfo`, `VariantTypeInfo` stays
+- [x] Update all tests and syntax references
+- [ ] Remove vestigial `PipeType.error_set` and `PipeType.error_union` variants — deferred to Phase 4 (still power existing try/catch system)
+
 ### Phase 4: Error payloads & errors as values
-- [ ] Evolve error syntax: `error union UserError { NotFound(const id: Int), Unknown }`
-- [ ] Reuse union machinery — `error union` is a union that can appear in `!T` position
-- [ ] Errors as values: fallible functions return a result wrapper (`ok` / `error`), not a control-flow signal
-- [ ] `try expr` — unwrap success value, propagate error to caller
-- [ ] `expr catch |e| { ... }` — handle error inline
-- [ ] Type checker: bare call to fallible function without `try`, `catch`, or `when` is a compile error (see `plan_when.md`)
-- [ ] Variants with fields become struct-like payloads
-- [ ] Error values carry payload (accessible via field access after catch/when)
-- [ ] Breaking change: migrate existing `error Name { V1, V2 }` to `error union`
-- [ ] Tests: error with payload, catch and access fields, unhandled error compile error
+- [ ] Lexer: add `try` and `catch` keywords (`error` already exists — verify and keep)
+- [ ] AST: add `is_error: bool` to `EnumDeclaration` — no new node needed
+- [ ] AST: add `Expression.try_expr`, `Expression.catch_expr` (binding name + body)
+- [ ] Parser: `error enum Name { ... }` → sets `is_error = true`, otherwise identical to `enum`
+- [ ] Parser: `try expr`, `expr catch |e| { ... }`
+- [ ] Types: add `is_error: bool` to `EnumTypeInfo` — no new type variant needed
+- [ ] Type checker: propagate `is_error` when registering; enforce that composed variants inside an `error enum` are themselves `error enum`s
+- [ ] Type checker: validate `!T` error side must be an `is_error` enum
+- [ ] Type checker: bare call to fallible function without `try`, `catch`, or `when` is a compile error
+- [ ] Type checker: `try` — caller must also return `!T`, propagates error type upward
+- [ ] Interpreter: `try` — unwrap ok value or propagate error; `catch` — bind error value, execute handler
+- [ ] Tests: declare error enum, catch and access fields, unhandled error compile error, composed error enums
 
 ### Phase 5: Struct methods
 - [ ] AST: methods list in struct declaration (reuse `FnDeclaration`)
@@ -74,15 +84,18 @@ Each phase is self-contained and testable.
 ## Design decisions
 
 - **`case struct` vs plain `struct`**: `case` enables auto-derived structural `==` and `toString`. Plain `struct` uses identity `==` and shows `<TypeName>`.
-- **Unions are always structural**: `==` compares variant tag + field values, `toString` auto-derived. No `case` modifier for unions.
-- **No `const struct` / `const union`**: mutability is always per-field, no type-level shorthand
+- **`union` renamed to `enum`**: `union` implies C-style untagged union; pipe-lang's type is a tagged sum type (algebraic data type), which is what Rust, Swift, and Kotlin call `enum`. Renamed in Phase 3.5.
+- **Enums are always structural**: `==` compares variant tag + field values, `toString` auto-derived. No `case` modifier for enums.
+- **No `const struct` / `const enum`**: mutability is always per-field, no type-level shorthand
 - **Positional construction for now**: `Point(1, 2)` — keyword arguments deferred as a separate feature for both constructors and function calls
 - **Struct construction looks like a function call**: parsed as a call, disambiguated in the type checker
 - **Dot access is uniform**: `expr.name` is parsed the same for field access, method calls, and qualified variant construction — semantics resolved in the type checker
 - **Union variant fields use `var`/`const`**: same rule as struct fields — scripting pragmatism over FP purity
-- **Union composition nests, not flattens**: `union AppError { UserError, ValidationError }` makes `UserError` a variant wrapping the inner union — enables grouped pattern matching (`AppError.UserError(_)` catches all user errors)
+- **Enum composition nests, not flattens**: `enum AppError { UserError, ValidationError }` makes `UserError` a variant wrapping the inner enum — enables grouped pattern matching (`AppError.UserError(_)` catches all user errors)
 - **Errors are values**: fallible functions return a result wrapper, not a control-flow signal. `try`, `catch`, and `when` are the three ways to handle them. Bare calls to fallible functions are compile errors.
-- **`error union` reuses union machinery**: an `error union` is a union that can appear in `!T` position — breaking change from existing `error Name { V1, V2 }`
+- **`error enum` reuses enum machinery**: an `error enum` is an enum with `is_error: bool` set — no new type variant, no parallel registry path. Only difference: can appear in `!T` position, and composed variants must themselves be `error enum`s.
+- **`is_error` is a marker, not a kind**: analogous to Swift's `Error` protocol conformance or Kotlin's sealed modifier — a boolean flag on `EnumTypeInfo`, not a separate type kind. A kind enum would be over-engineering for a single distinction.
+- **Vestigial `error_set` / `error_union` removed**: predated the enum infrastructure; superseded by `is_error` on `EnumTypeInfo`.
 - **`when`, `self`, `Self` reserved now**: keywords added in Phase 1, used in later phases
 - **No `@identity` needed**: plain `struct` already provides identity semantics; `case struct` provides structural
 - **Declaration termination**: `}` if it has braces, `;` otherwise — no `};`
@@ -123,23 +136,23 @@ struct Session(const user: User, var token: String);
 - `fn equals(self: const Self, other: const Self) Bool` → overrides `==`
 - `fn toString(self: const Self) String` → overrides print formatting
 
-### Union
+### Enum
 
 ```pipe
-union Role {
+enum Role {
     Admin,
     Member(const team: String),
     Guest,
 }
 
-// Composing unions — nests existing unions as variants
-union StaffRole {
+// Composing enums — nests existing enums as variants
+enum StaffRole {
     Admin,
     Member(const team: String),
 }
 
-union AnyRole {
-    StaffRole,   // nested: AnyRole.StaffRole wraps the StaffRole union
+enum AnyRole {
+    StaffRole,   // nested: AnyRole.StaffRole wraps the StaffRole enum
     Guest,
 }
 ```
@@ -150,24 +163,25 @@ const role = Role.Member("engineering");
 print(role.team);    // engineering
 ```
 
-### Error union
+### Error enum
 
 ```pipe
-// Declaring — same as union but allowed in !T position
-error union UserError {
+// Declaring — same as enum but allowed in !T position
+error enum UserError {
     NotFound(const id: Int),
     PermissionDenied(const role: String),
     Unknown,
 }
 
-// Composing
-error union AppError {
-    UserError,
-    ValidationError,
+// Composing — nested variants must also be error enums
+error enum AppError {
+    UserError,        // ✅ UserError is an error enum
+    ValidationError,  // ✅ ValidationError is an error enum
+    // SomeRegularEnum  ❌ compile error — not an error enum
 }
 
 // Usage in return types (existing !T syntax)
-fn find_user(id: Int) UserError!User { ... }
+fn find_user(id: Int) UserError!User { ... }   // UserError must be an error enum
 ```
 
 ### Construction (uniform)
@@ -235,7 +249,7 @@ find_user(42);  // ERROR: error must be handled with try, catch, or when
 ```pipe
 case struct User(const id: Int, const name: String, var email: String);
 
-error union UserError {
+error enum UserError {
     NotFound(const id: Int),
     Unknown,
 }

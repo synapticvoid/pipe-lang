@@ -14,7 +14,7 @@ pub const PipeType = union(enum) {
     // Structs
 
     struct_type: []const u8,
-    union_type: []const u8,
+    enum_type: []const u8,
 
     // Errors
 
@@ -44,8 +44,8 @@ pub const PipeType = union(enum) {
                 return std.mem.eql(u8, self.struct_type, other.struct_type);
             }
 
-            if (self_tag == .union_type) {
-                return std.mem.eql(u8, self.union_type, other.union_type);
+            if (self_tag == .enum_type) {
+                return std.mem.eql(u8, self.enum_type, other.enum_type);
             }
 
             return true;
@@ -84,7 +84,7 @@ pub const PipeType = union(enum) {
 
 pub const TypeInfo = union(enum) {
     struct_type: StructTypeInfo,
-    union_type: UnionTypeInfo,
+    enum_type: EnumTypeInfo,
 };
 
 pub const StructTypeInfo = struct {
@@ -92,7 +92,7 @@ pub const StructTypeInfo = struct {
     kind: ast.StructKind,
 };
 
-pub const UnionTypeInfo = struct {
+pub const EnumTypeInfo = struct {
     variants: []const VariantTypeInfo,
 };
 

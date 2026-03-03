@@ -59,8 +59,8 @@ pub const Parser = struct {
             return .{ .struct_declaration = try self.parseStructDeclarationStatement(.plain) };
         }
 
-        if (self.match(&.{.@"union"})) {
-            return .{ .union_declaration = try self.parseUnionDeclarationStatement() };
+        if (self.match(&.{.@"enum"})) {
+            return .{ .enum_declaration = try self.parseEnumDeclarationStatement() };
         }
 
         if (self.match(&.{.@"error"})) {
@@ -171,9 +171,9 @@ pub const Parser = struct {
         return .{ .name = name, .kind = kind, .fields = fields };
     }
 
-    fn parseUnionDeclarationStatement(self: *Parser) !ast.Statement.UnionDeclaration {
-        const name = try self.consume(.identifier, "Expect union name.");
-        _ = try self.consume(.lbrace, "Expect '{' after union name.");
+    fn parseEnumDeclarationStatement(self: *Parser) !ast.Statement.EnumDeclaration {
+        const name = try self.consume(.identifier, "Expect enum name.");
+        _ = try self.consume(.lbrace, "Expect '{' after enum name.");
 
         // Parse variants
         var variants: std.ArrayList(ast.Statement.Variant) = .{};
@@ -194,7 +194,7 @@ pub const Parser = struct {
             _ = self.match(&.{.comma});
         }
 
-        _ = try self.consume(.rbrace, "Expect '}' after union name.");
+        _ = try self.consume(.rbrace, "Expect '}' after enum name.");
 
         return .{
             .name = name,

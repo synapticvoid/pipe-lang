@@ -90,13 +90,13 @@ test "parse dot access" {
     try std.testing.expectEqualStrings("name", fa.name.lexeme);
 }
 
-test "parse union declaration - no payload variants" {
+test "parse enum declaration - no payload variants" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    const result = try helpers.parse("union Role { Admin, Member, Guest, }", allocator);
+    const result = try helpers.parse("enum Role { Admin, Member, Guest, }", allocator);
 
-    const decl = result[0].union_declaration;
+    const decl = result[0].enum_declaration;
     try std.testing.expectEqualStrings("Role", decl.name.lexeme);
     try std.testing.expectEqual(@as(usize, 3), decl.variants.len);
     try std.testing.expectEqualStrings("Admin", decl.variants[0].name.lexeme);
@@ -105,13 +105,13 @@ test "parse union declaration - no payload variants" {
     try std.testing.expectEqualStrings("Guest", decl.variants[2].name.lexeme);
 }
 
-test "parse union declaration - variant with fields" {
+test "parse enum declaration - variant with fields" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    const result = try helpers.parse("union Role { Admin, Member(const team: String), Guest, }", allocator);
+    const result = try helpers.parse("enum Role { Admin, Member(const team: String), Guest, }", allocator);
 
-    const decl = result[0].union_declaration;
+    const decl = result[0].enum_declaration;
     try std.testing.expectEqualStrings("Role", decl.name.lexeme);
     try std.testing.expectEqual(@as(usize, 3), decl.variants.len);
     try std.testing.expectEqual(@as(usize, 0), decl.variants[0].fields.len);

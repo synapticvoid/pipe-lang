@@ -29,8 +29,8 @@ pub const InterpreterError = error{
 
 pub const Interpreter = struct {
     env: *Environment,
-    // Lookup registry to match union name (used for type coercion)
-    known_union_names: std.StringHashMap(void),
+    // Lookup registry to match enum name (used for type coercion)
+    known_enum_names: std.StringHashMap(void),
     ctx: RuntimeContext,
     return_value: ?Value = null,
     error_value: ?Value = null,
@@ -43,7 +43,7 @@ pub const Interpreter = struct {
 
         return .{
             .env = env,
-            .known_union_names = std.StringHashMap(void).init(allocator),
+            .known_enum_names = std.StringHashMap(void).init(allocator),
             .ctx = ctx,
             .allocator = allocator,
         };
@@ -70,7 +70,7 @@ pub const Interpreter = struct {
             .error_declaration => |decl| _ = decl,
             .error_union_declaration => |decl| _ = decl,
             .struct_declaration => |decl| try self.executeStructDeclarationStatement(decl),
-            .union_declaration => |decl| try self.executeUnionDeclaration(decl),
+            .enum_declaration => |decl| try self.executeEnumDeclaration(decl),
         }
     }
 
@@ -106,12 +106,12 @@ pub const Interpreter = struct {
         } } });
     }
 
-    fn executeUnionDeclaration(self: *Interpreter, decl: ast.Statement.UnionDeclaration) !void {
+    fn executeEnumDeclaration(self: *Interpreter, decl: ast.Statement.EnumDeclaration) !void {
         for (decl.variants) |variant| {
             const field_names: [][]const u8 = blk: {
-                // Branch when we reference an existing union
+                // Branch when we reference an existing enum
                 if (variant.fields.len != 0) break :blk null;
-                if (!self.known_union_names.contains(variant.name.lexeme)) break :blk null;
+                if (!self.known_enum_names.contains(variant.name.lexeme)) break :blk null;
 
                 // Create a single-field variant for the constructor
                 const names = try self.allocator.alloc([]const u8, 1);
@@ -133,8 +133,8 @@ pub const Interpreter = struct {
             } } });
         }
 
-        // Don't forget to add the union to our known union names
-        try self.known_union_names.put(decl.name.lexeme, {});
+        // Don't forget to add the enum to our known enum names
+        try self.known_enum_names.put(decl.name.lexeme, {});
     }
 
     // NOTE: -- Expressions

@@ -24,7 +24,7 @@ pub const Statement = union(enum) {
 
     // Structs
     struct_declaration: StructDeclaration,
-    union_declaration: UnionDeclaration,
+    enum_declaration: EnumDeclaration,
 
     // -------------------------------------------------------------------
 
@@ -67,7 +67,7 @@ pub const Statement = union(enum) {
         kind: StructKind,
     };
 
-    pub const UnionDeclaration = struct {
+    pub const EnumDeclaration = struct {
         name: Token,
         variants: []const Variant,
     };

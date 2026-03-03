@@ -204,57 +204,57 @@ test "struct print" {
     });
 }
 
-test "union no-payload variant construction" {
+test "enum no-payload variant construction" {
     try expectEval(.{
-        .{ "union Role { Admin, Member, Guest, } Role.Admin();", "Role.Admin()" },
+        .{ "enum Role { Admin, Member, Guest, } Role.Admin();", "Role.Admin()" },
     });
 }
 
-test "union variant with field construction and access" {
+test "enum variant with field construction and access" {
     try expectEval(.{
-        .{ "union Role { Admin, Member(const team: String), Guest, } const r = Role.Member(\"eng\"); r.team;", "\"eng\"" },
+        .{ "enum Role { Admin, Member(const team: String), Guest, } const r = Role.Member(\"eng\"); r.team;", "\"eng\"" },
     });
 }
 
-test "union variant print" {
+test "enum variant print" {
     try expectOutput(.{
-        .{ "union Role { Admin, Member(const team: String), } print(Role.Admin());", "Role.Admin()\n" },
-        .{ "union Role { Admin, Member(const team: String), } print(Role.Member(\"eng\"));", "Role.Member(team=\"eng\")\n" },
+        .{ "enum Role { Admin, Member(const team: String), } print(Role.Admin());", "Role.Admin()\n" },
+        .{ "enum Role { Admin, Member(const team: String), } print(Role.Member(\"eng\"));", "Role.Member(team=\"eng\")\n" },
     });
 }
 
-test "union equality is structural" {
+test "enum equality is structural" {
     try expectEval(.{
-        .{ "union Role { Admin, Member(const team: String), } Role.Admin() == Role.Admin();", "true" },
-        .{ "union Role { Admin, Member(const team: String), } Role.Member(\"eng\") == Role.Member(\"eng\");", "true" },
-        .{ "union Role { Admin, Member(const team: String), } Role.Member(\"eng\") == Role.Member(\"other\");", "false" },
-        .{ "union Role { Admin, Member(const team: String), } Role.Admin() == Role.Member(\"eng\");", "false" },
+        .{ "enum Role { Admin, Member(const team: String), } Role.Admin() == Role.Admin();", "true" },
+        .{ "enum Role { Admin, Member(const team: String), } Role.Member(\"eng\") == Role.Member(\"eng\");", "true" },
+        .{ "enum Role { Admin, Member(const team: String), } Role.Member(\"eng\") == Role.Member(\"other\");", "false" },
+        .{ "enum Role { Admin, Member(const team: String), } Role.Admin() == Role.Member(\"eng\");", "false" },
     });
 }
 
-test "union composition explicit construction" {
+test "enum composition explicit construction" {
     try expectEval(.{
-        .{ "union StaffRole { Admin, Member(const team: String), } union AnyRole { StaffRole, Guest, } AnyRole.StaffRole(StaffRole.Admin());", "AnyRole.StaffRole(StaffRole=StaffRole.Admin())" },
-        .{ "union StaffRole { Admin, Member(const team: String), } union AnyRole { StaffRole, Guest, } AnyRole.StaffRole(StaffRole.Member(\"eng\"));", "AnyRole.StaffRole(StaffRole=StaffRole.Member(team=\"eng\"))" },
+        .{ "enum StaffRole { Admin, Member(const team: String), } enum AnyRole { StaffRole, Guest, } AnyRole.StaffRole(StaffRole.Admin());", "AnyRole.StaffRole(StaffRole=StaffRole.Admin())" },
+        .{ "enum StaffRole { Admin, Member(const team: String), } enum AnyRole { StaffRole, Guest, } AnyRole.StaffRole(StaffRole.Member(\"eng\"));", "AnyRole.StaffRole(StaffRole=StaffRole.Member(team=\"eng\"))" },
     });
 }
 
-test "union composition implicit coercion" {
+test "enum composition implicit coercion" {
     try expectEval(.{
-        .{ "union StaffRole { Admin, } union AnyRole { StaffRole, Guest, } const r: AnyRole = StaffRole.Admin(); r;", "StaffRole.Admin()" },
+        .{ "enum StaffRole { Admin, } enum AnyRole { StaffRole, Guest, } const r: AnyRole = StaffRole.Admin(); r;", "StaffRole.Admin()" },
     });
 }
 
-test "union composition equality" {
+test "enum composition equality" {
     try expectEval(.{
-        .{ "union StaffRole { Admin, } union AnyRole { StaffRole, Guest, } const a: AnyRole = StaffRole.Admin(); const b: AnyRole = StaffRole.Admin(); a == b;", "true" },
-        .{ "union StaffRole { Admin, Guest, } union AnyRole { StaffRole, } const a: AnyRole = StaffRole.Admin(); const b: AnyRole = StaffRole.Guest(); a == b;", "false" },
+        .{ "enum StaffRole { Admin, } enum AnyRole { StaffRole, Guest, } const a: AnyRole = StaffRole.Admin(); const b: AnyRole = StaffRole.Admin(); a == b;", "true" },
+        .{ "enum StaffRole { Admin, Guest, } enum AnyRole { StaffRole, } const a: AnyRole = StaffRole.Admin(); const b: AnyRole = StaffRole.Guest(); a == b;", "false" },
     });
 }
 
-test "union composition print" {
+test "enum composition print" {
     try expectOutput(.{
-        .{ "union StaffRole { Admin, } union AnyRole { StaffRole, Guest, } print(AnyRole.StaffRole(StaffRole.Admin()));", "AnyRole.StaffRole(StaffRole=StaffRole.Admin())\n" },
-        .{ "union StaffRole { Admin, } union AnyRole { StaffRole, Guest, } print(AnyRole.Guest());", "AnyRole.Guest()\n" },
+        .{ "enum StaffRole { Admin, } enum AnyRole { StaffRole, Guest, } print(AnyRole.StaffRole(StaffRole.Admin()));", "AnyRole.StaffRole(StaffRole=StaffRole.Admin())\n" },
+        .{ "enum StaffRole { Admin, } enum AnyRole { StaffRole, Guest, } print(AnyRole.Guest());", "AnyRole.Guest()\n" },
     });
 }

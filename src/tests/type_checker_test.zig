@@ -186,61 +186,61 @@ test "struct used as field type" {
     );
 }
 
-// -- Unions
+// -- Enums
 
-test "union declaration is valid" {
-    try expectTypeCheck("union Role { Admin, Member(const team: String), Guest, }");
+test "enum declaration is valid" {
+    try expectTypeCheck("enum Role { Admin, Member(const team: String), Guest, }");
 }
 
-test "union variant construction type checks" {
+test "enum variant construction type checks" {
     try expectTypeCheck(
-        \\union Role { Admin, Member(const team: String), Guest, }
+        \\enum Role { Admin, Member(const team: String), Guest, }
         \\const r = Role.Member("eng");
     );
 }
 
-test "union variant construction wrong arg count rejected" {
+test "enum variant construction wrong arg count rejected" {
     try expectTypeError(
-        \\union Role { Admin, Member(const team: String), }
+        \\enum Role { Admin, Member(const team: String), }
         \\const r = Role.Member("eng", "extra");
     );
 }
 
-test "union variant construction wrong arg type rejected" {
+test "enum variant construction wrong arg type rejected" {
     try expectTypeError(
-        \\union Role { Admin, Member(const team: String), }
+        \\enum Role { Admin, Member(const team: String), }
         \\const r = Role.Member(42);
     );
 }
 
-test "union variant field access type checks" {
+test "enum variant field access type checks" {
     try expectTypeCheck(
-        \\union Role { Admin, Member(const team: String), }
+        \\enum Role { Admin, Member(const team: String), }
         \\const r = Role.Member("eng");
         \\const t: String = r.team;
     );
 }
 
-test "union composition declaration and explicit construction type checks" {
+test "enum composition declaration and explicit construction type checks" {
     try expectTypeCheck(
-        \\union StaffRole { Admin, Member(const team: String), }
-        \\union AnyRole { StaffRole, Guest, }
+        \\enum StaffRole { Admin, Member(const team: String), }
+        \\enum AnyRole { StaffRole, Guest, }
         \\const r = AnyRole.StaffRole(StaffRole.Admin());
     );
 }
 
-test "union composition implicit coercion type checks" {
+test "enum composition implicit coercion type checks" {
     try expectTypeCheck(
-        \\union StaffRole { Admin, Member(const team: String), }
-        \\union AnyRole { StaffRole, Guest, }
+        \\enum StaffRole { Admin, Member(const team: String), }
+        \\enum AnyRole { StaffRole, Guest, }
         \\const r: AnyRole = StaffRole.Admin();
     );
 }
 
-test "union composition wrong type rejected" {
+test "enum composition wrong type rejected" {
     try expectTypeError(
-        \\union StaffRole { Admin, }
-        \\union AnyRole { StaffRole, Guest, }
+        \\enum StaffRole { Admin, }
+        \\enum AnyRole { StaffRole, Guest, }
         \\const r: AnyRole = 42;
     );
 }
