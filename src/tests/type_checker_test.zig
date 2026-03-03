@@ -185,3 +185,38 @@ test "struct used as field type" {
         \\struct Session(const user: User, var token: String);
     );
 }
+
+// -- Unions
+
+test "union declaration is valid" {
+    try expectTypeCheck("union Role { Admin, Member(const team: String), Guest, }");
+}
+
+test "union variant construction type checks" {
+    try expectTypeCheck(
+        \\union Role { Admin, Member(const team: String), Guest, }
+        \\const r = Role.Member("eng");
+    );
+}
+
+test "union variant construction wrong arg count rejected" {
+    try expectTypeError(
+        \\union Role { Admin, Member(const team: String), }
+        \\const r = Role.Member("eng", "extra");
+    );
+}
+
+test "union variant construction wrong arg type rejected" {
+    try expectTypeError(
+        \\union Role { Admin, Member(const team: String), }
+        \\const r = Role.Member(42);
+    );
+}
+
+test "union variant field access type checks" {
+    try expectTypeCheck(
+        \\union Role { Admin, Member(const team: String), }
+        \\const r = Role.Member("eng");
+        \\const t: String = r.team;
+    );
+}

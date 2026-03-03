@@ -203,3 +203,22 @@ test "struct print" {
         .{ "struct Session(const token: String); print(Session(\"abc\"));", "<Session>\n" },
     });
 }
+
+test "union no-payload variant construction" {
+    try expectEval(.{
+        .{ "union Role { Admin, Member, Guest, } Role.Admin();", "Role.Admin()" },
+    });
+}
+
+test "union variant with field construction and access" {
+    try expectEval(.{
+        .{ "union Role { Admin, Member(const team: String), Guest, } const r = Role.Member(\"eng\"); r.team;", "\"eng\"" },
+    });
+}
+
+test "union variant print" {
+    try expectOutput(.{
+        .{ "union Role { Admin, Member(const team: String), } print(Role.Admin());", "Role.Admin()\n" },
+        .{ "union Role { Admin, Member(const team: String), } print(Role.Member(\"eng\"));", "Role.Member(team=\"eng\")\n" },
+    });
+}

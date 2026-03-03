@@ -22,8 +22,9 @@ pub const Statement = union(enum) {
     // error Name = A | B
     error_union_declaration: ErrorUnionDeclaration,
 
-    // struct
+    // Structs
     struct_declaration: StructDeclaration,
+    union_declaration: UnionDeclaration,
 
     // -------------------------------------------------------------------
 
@@ -64,6 +65,16 @@ pub const Statement = union(enum) {
         name: Token,
         fields: []const FieldDeclaration,
         kind: StructKind,
+    };
+
+    pub const UnionDeclaration = struct {
+        name: Token,
+        variants: []const Variant,
+    };
+
+    pub const Variant = struct {
+        name: Token,
+        fields: []const FieldDeclaration,
     };
 
     pub const FieldDeclaration = struct {

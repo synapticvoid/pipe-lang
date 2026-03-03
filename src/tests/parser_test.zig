@@ -90,6 +90,39 @@ test "parse dot access" {
     try std.testing.expectEqualStrings("name", fa.name.lexeme);
 }
 
+test "parse union declaration - no payload variants" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const result = try helpers.parse("union Role { Admin, Member, Guest, }", allocator);
+
+    const decl = result[0].union_declaration;
+    try std.testing.expectEqualStrings("Role", decl.name.lexeme);
+    try std.testing.expectEqual(@as(usize, 3), decl.variants.len);
+    try std.testing.expectEqualStrings("Admin", decl.variants[0].name.lexeme);
+    try std.testing.expectEqual(@as(usize, 0), decl.variants[0].fields.len);
+    try std.testing.expectEqualStrings("Member", decl.variants[1].name.lexeme);
+    try std.testing.expectEqualStrings("Guest", decl.variants[2].name.lexeme);
+}
+
+test "parse union declaration - variant with fields" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const result = try helpers.parse("union Role { Admin, Member(const team: String), Guest, }", allocator);
+
+    const decl = result[0].union_declaration;
+    try std.testing.expectEqualStrings("Role", decl.name.lexeme);
+    try std.testing.expectEqual(@as(usize, 3), decl.variants.len);
+    try std.testing.expectEqual(@as(usize, 0), decl.variants[0].fields.len);
+    const member = decl.variants[1];
+    try std.testing.expectEqualStrings("Member", member.name.lexeme);
+    try std.testing.expectEqual(@as(usize, 1), member.fields.len);
+    try std.testing.expectEqualStrings("team", member.fields[0].name.lexeme);
+    try std.testing.expectEqual(.constant, member.fields[0].mutability);
+    try std.testing.expectEqual(@as(usize, 0), decl.variants[2].fields.len);
+}
+
 test "parse chained dot access" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

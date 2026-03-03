@@ -2,6 +2,7 @@ const std = @import("std");
 const ast = @import("ast.zig");
 const builtins = @import("builtins.zig");
 const token = @import("token.zig");
+const utils = @import("utils.zig");
 
 const RuntimeContext = @import("runtime.zig").RuntimeContext;
 const Environment = @import("environment.zig").Environment;
@@ -66,6 +67,7 @@ pub const Interpreter = struct {
             .error_declaration => |decl| _ = decl,
             .error_union_declaration => |decl| _ = decl,
             .struct_declaration => |decl| try self.executeStructDeclarationStatement(decl),
+            .union_declaration => |decl| try self.executeUnionDeclaration(decl),
         }
     }
 
@@ -99,6 +101,22 @@ pub const Interpreter = struct {
             .field_names = field_names,
             .kind = decl.kind,
         } } });
+    }
+
+    fn executeUnionDeclaration(self: *Interpreter, decl: ast.Statement.UnionDeclaration) !void {
+        for (decl.variants) |variant| {
+            const field_names = try self.allocator.alloc([]const u8, variant.fields.len);
+            for (variant.fields, 0..) |field, i| {
+                field_names[i] = field.name.lexeme;
+            }
+
+            const constructor_name = try utils.qualifiedName(self.allocator, decl.name.lexeme, variant.name.lexeme);
+            try self.env.define(constructor_name, .{ .function = .{ .struct_constructor = .{
+                .name = constructor_name,
+                .field_names = field_names,
+                .kind = .case,
+            } } });
+        }
     }
 
     // NOTE: -- Expressions
@@ -246,7 +264,15 @@ pub const Interpreter = struct {
     }
 
     fn evaluateFieldAccess(self: *Interpreter, e: *Expression.FieldAccess) InterpreterError!Value {
-        // Evalute object first
+        // Check for qualified union variant constructor: Role.Member
+        if (e.object == .variable) {
+            const qualified = try utils.qualifiedName(self.allocator, e.object.variable.token.lexeme, e.name.lexeme);
+            if (self.env.get(qualified)) |val| {
+                return val;
+            } else |_| {}
+        }
+
+        // Evaluate object first
         const obj = try self.evaluate(e.object);
         const inst = switch (obj) {
             .struct_instance => |ptr| ptr.*,

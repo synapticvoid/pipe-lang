@@ -31,12 +31,12 @@ Each phase is self-contained and testable.
 - [x] Tests: declare, construct, access fields, print, compare (both case and plain)
 
 ### Phase 3: Union
-- [ ] AST: `Statement.union_declaration` (name, variants with optional fields)
-- [ ] Parser: parse `union Role { Admin, Member(const team: String), Guest }`
-- [ ] Parser: parse `Role.Member("engineering")` as qualified construction (reuses dot access from Phase 2)
-- [ ] Types: add union type to registry (variant name → optional field descriptors)
-- [ ] Type checker: validate union construction
-- [ ] Interpreter: evaluate union construction, support field access on variants
+- [x] AST: `Statement.union_declaration` (name, variants with fields as non-optional slice)
+- [x] Parser: parse `union Role { Admin, Member(const team: String), Guest }`
+- [x] Parser: parse `Role.Member("engineering")` as qualified construction (reuses dot access from Phase 2)
+- [x] Types: add `PipeType.union_type`, `TypeInfo` registry (struct and union share one hashmap), `UnionTypeInfo`, `VariantTypeInfo`
+- [x] Type checker: register union type + variant constructors, validate construction and field access
+- [x] Interpreter: evaluate union construction, support field access on variants
 - [ ] Unions are always structural: `==` compares variant tag + fields, `toString` shows `Role.Member(team=engineering)`
 - [ ] Union composition: `union AnyRole { StaffRole, Guest }` (nests existing unions as variants)
 - [ ] Tests: declare, construct, access variant fields, compare, compose unions

@@ -14,6 +14,7 @@ pub const PipeType = union(enum) {
     // Structs
 
     struct_type: []const u8,
+    union_type: []const u8,
 
     // Errors
 
@@ -42,6 +43,11 @@ pub const PipeType = union(enum) {
             if (self_tag == .struct_type) {
                 return std.mem.eql(u8, self.struct_type, other.struct_type);
             }
+
+            if (self_tag == .union_type) {
+                return std.mem.eql(u8, self.union_type, other.union_type);
+            }
+
             return true;
         }
 
@@ -76,9 +82,23 @@ pub const PipeType = union(enum) {
     }
 };
 
+pub const TypeInfo = union(enum) {
+    struct_type: StructTypeInfo,
+    union_type: UnionTypeInfo,
+};
+
 pub const StructTypeInfo = struct {
     fields: []const FieldInfo,
     kind: ast.StructKind,
+};
+
+pub const UnionTypeInfo = struct {
+    variants: []const VariantTypeInfo,
+};
+
+pub const VariantTypeInfo = struct {
+    name: []const u8,
+    fields: []const FieldInfo,
 };
 
 pub const FieldInfo = struct {

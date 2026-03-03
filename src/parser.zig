@@ -59,6 +59,10 @@ pub const Parser = struct {
             return .{ .struct_declaration = try self.parseStructDeclarationStatement(.plain) };
         }
 
+        if (self.match(&.{.@"union"})) {
+            return .{ .union_declaration = try self.parseUnionDeclarationStatement() };
+        }
+
         if (self.match(&.{.@"error"})) {
             const name = try self.consume(.identifier, "Expect error type name");
 
@@ -159,41 +163,43 @@ pub const Parser = struct {
         const name = try self.consume(.identifier, "Expect struct name.");
         _ = try self.consume(.lparen, "Expect '(' after struct name.");
 
-        // Parse struct fields
-        var fields: std.ArrayList(ast.Statement.FieldDeclaration) = .{};
-        while (!self.check(.rparen)) {
-            // Parse field mutability
-            if (!self.match(&.{ .@"const", .@"var" })) {
-                return error.UnexpectedToken;
-            }
-            const mutability: ast.Mutability = switch (self.previous().type) {
-                .@"const" => .constant,
-                .@"var" => .mutable,
-                else => unreachable,
-            };
-
-            // Parse field name
-            const field_name = try self.consume(.identifier, "Expect field name.");
-            _ = try self.consume(.colon, "Expect ':' after field name.");
-            const field_type = try self.parseReturnType();
-
-            try fields.append(
-                self.allocator,
-                .{
-                    .name = field_name,
-                    .type_annotation = field_type,
-                    .mutability = mutability,
-                },
-            );
-
-            // Parse optional comma
-            _ = self.match(&.{.comma});
-        }
+        const fields = try self.parseFieldList();
 
         _ = try self.consume(.rparen, "Expect ')' after struct fields.");
         _ = try self.consume(.semicolon, "Expect ';' after struct declaration.");
 
-        return .{ .name = name, .kind = kind, .fields = fields.items };
+        return .{ .name = name, .kind = kind, .fields = fields };
+    }
+
+    fn parseUnionDeclarationStatement(self: *Parser) !ast.Statement.UnionDeclaration {
+        const name = try self.consume(.identifier, "Expect union name.");
+        _ = try self.consume(.lbrace, "Expect '{' after union name.");
+
+        // Parse variants
+        var variants: std.ArrayList(ast.Statement.Variant) = .{};
+        while (!self.check(.rbrace)) {
+            const variant_name = try self.consume(.identifier, "Expect variant name.");
+
+            const variant_fields: []const ast.Statement.FieldDeclaration = if (self.match(&.{.lparen})) blk: {
+                const fields = try self.parseFieldList();
+                _ = try self.consume(.rparen, "Expect ')' after variant fields.");
+                break :blk fields;
+            } else &.{};
+
+            try variants.append(self.allocator, .{
+                .name = variant_name,
+                .fields = variant_fields,
+            });
+
+            _ = self.match(&.{.comma});
+        }
+
+        _ = try self.consume(.rbrace, "Expect '}' after union name.");
+
+        return .{
+            .name = name,
+            .variants = variants.items,
+        };
     }
 
     fn parseErrorDeclarationStatement(self: *Parser, name: Token) ParseError!ast.Statement.ErrorDeclaration {
@@ -526,6 +532,46 @@ pub const Parser = struct {
         }
 
         return left;
+    }
+
+    fn parseFieldList(self: *Parser) ParseError![]ast.Statement.FieldDeclaration {
+
+        // Parse struct fields
+        var fields: std.ArrayList(ast.Statement.FieldDeclaration) = .{};
+        while (!self.check(.rparen)) {
+            try fields.append(
+                self.allocator,
+                try self.parseFieldDeclaration(),
+            );
+
+            // Parse optional comma
+            _ = self.match(&.{.comma});
+        }
+
+        return fields.items;
+    }
+
+    fn parseFieldDeclaration(self: *Parser) ParseError!ast.Statement.FieldDeclaration {
+        // Parse field mutability
+        if (!self.match(&.{ .@"const", .@"var" })) {
+            return error.UnexpectedToken;
+        }
+        const mutability: ast.Mutability = switch (self.previous().type) {
+            .@"const" => .constant,
+            .@"var" => .mutable,
+            else => unreachable,
+        };
+
+        // Parse field name
+        const name = try self.consume(.identifier, "Expect field name.");
+        _ = try self.consume(.colon, "Expect ':' after field name.");
+        const field_type = try self.parseReturnType();
+
+        return .{
+            .name = name,
+            .type_annotation = field_type,
+            .mutability = mutability,
+        };
     }
 
     // True when the current token is EOF.

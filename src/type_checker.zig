@@ -3,6 +3,7 @@ const std = @import("std");
 const ast = @import("ast.zig");
 const builtins = @import("builtins.zig");
 const types = @import("types.zig");
+const utils = @import("utils.zig");
 const PipeType = types.PipeType;
 const Token = @import("token.zig").Token;
 
@@ -72,8 +73,8 @@ pub const TypeChecker = struct {
     error_sets: std.StringHashMap([]const []const u8),
 
     // Looko up table to match struct types
-    // name -> struct type
-    struct_types: std.StringHashMap(types.StructTypeInfo),
+    // name -> struct/union type
+    type_registry: std.StringHashMap(types.TypeInfo),
 
     // Last type checker error message
     last_error: ?[]const u8 = null,
@@ -90,7 +91,7 @@ pub const TypeChecker = struct {
         return .{
             .env = env,
             .error_sets = std.StringHashMap([]const []const u8).init(allocator),
-            .struct_types = std.StringHashMap(types.StructTypeInfo).init(allocator),
+            .type_registry = std.StringHashMap(types.TypeInfo).init(allocator),
             .allocator = allocator,
         };
     }
@@ -118,6 +119,7 @@ pub const TypeChecker = struct {
                 .error_declaration => |decl| try self.registerErrorSet(decl),
                 .error_union_declaration => |decl| try self.registerErrorUnion(decl),
                 .struct_declaration => |decl| try self.checkStructDeclarationStatement(decl),
+                .union_declaration => |decl| try self.checkUnionDeclarationStatement(decl),
             }
         }
 
@@ -221,30 +223,36 @@ pub const TypeChecker = struct {
 
     fn checkStructDeclarationStatement(self: *TypeChecker, decl: ast.Statement.StructDeclaration) !void {
         // Check fields info
-        const resolved_fields = try self.allocator.alloc(types.FieldInfo, decl.fields.len);
-        for (decl.fields, 0..) |field, i| {
-            resolved_fields[i] = .{
-                .name = field.name.lexeme,
-                .pipe_type = try self.resolveTypeAnnotation(field.type_annotation),
-                .mutability = field.mutability,
+        const resolved_fields = try self.resolveFields(decl.fields);
+
+        // Declare the struct in the registry
+        try self.type_registry.put(decl.name.lexeme, .{ .struct_type = .{
+            .fields = resolved_fields,
+            .kind = decl.kind,
+        } });
+
+        // Register constructor as a function
+        try self.registerConstructor(decl.name.lexeme, resolved_fields, .{ .struct_type = decl.name.lexeme });
+    }
+
+    fn checkUnionDeclarationStatement(self: *TypeChecker, decl: ast.Statement.UnionDeclaration) !void {
+        // Check variants
+        var resolved_variants = try self.allocator.alloc(types.VariantTypeInfo, decl.variants.len);
+        for (decl.variants, 0..) |variant, i| {
+            const resolved_fields = try self.resolveFields(variant.fields);
+
+            // variant constructor name is Union.VariantName
+            const variant_name = try utils.qualifiedName(self.allocator, decl.name.lexeme, variant.name.lexeme);
+            try self.registerConstructor(variant_name, resolved_fields, .{ .union_type = decl.name.lexeme });
+
+            resolved_variants[i] = .{
+                .name = variant.name.lexeme,
+                .fields = resolved_fields,
             };
         }
 
-        // Declare the struct in the registry
-        try self.struct_types.put(decl.name.lexeme, .{
-            .fields = resolved_fields,
-            .kind = decl.kind,
-        });
-
-        // Register constructor as a function
-        const param_types = try self.allocator.alloc(PipeType, decl.fields.len);
-        for (resolved_fields, 0..) |fi, i| {
-            param_types[i] = fi.pipe_type;
-        }
-
-        try self.env.define(decl.name.lexeme, .{ .function = .{
-            .param_types = param_types,
-            .return_type = .{ .struct_type = decl.name.lexeme },
+        try self.type_registry.put(decl.name.lexeme, .{ .union_type = .{
+            .variants = resolved_variants,
         } });
     }
 
@@ -404,14 +412,19 @@ pub const TypeChecker = struct {
     }
 
     fn checkInit(self: *TypeChecker, init_expr: *ast.Expression.StructInit) TypeCheckError!TypeInfo {
-        const info = self.struct_types.get(init_expr.name.lexeme) orelse return error.UndefinedType;
+        const info = self.type_registry.get(init_expr.name.lexeme) orelse return error.UndefinedType;
 
-        if (init_expr.args.len != info.fields.len) {
-            return self.fail(error.TypeMismatch, "Wrong number of arguments: expected {d}, got {d}", .{ info.fields.len, init_expr.args.len });
+        const struct_type = switch (info) {
+            .struct_type => |s| s,
+            else => return error.TypeMismatch,
+        };
+
+        if (init_expr.args.len != struct_type.fields.len) {
+            return self.fail(error.TypeMismatch, "Wrong number of arguments: expected {d}, got {d}", .{ struct_type.fields.len, init_expr.args.len });
         }
 
         // Compare args and field types
-        for (init_expr.args, info.fields, 0..) |arg, field, i| {
+        for (init_expr.args, struct_type.fields, 0..) |arg, field, i| {
             const arg_type = try expectType(try self.checkExpression(arg));
             if (!arg_type.compatible(field.pipe_type)) {
                 return self.fail(error.TypeMismatch, "Type mismatch: argument {d} expected {s}, got {s}", .{ i + 1, @tagName(field.pipe_type), @tagName(arg_type) });
@@ -422,6 +435,16 @@ pub const TypeChecker = struct {
     }
 
     fn checkFieldAccess(self: *TypeChecker, field_access: *ast.Expression.FieldAccess) TypeCheckError!TypeInfo {
+        // We have to check for a constructor call early one
+        // Constructors are registered as function calls in the environment
+        if (field_access.object == .variable) {
+            const qualified = try utils.qualifiedName(self.allocator, field_access.object.variable.token.lexeme, field_access.name.lexeme);
+
+            if (self.env.get(qualified)) |val| {
+                return val;
+            } else |_| {}
+        }
+
         const obj_type = try expectType(try self.checkExpression(field_access.object));
 
         const struct_name = switch (obj_type) {
@@ -429,10 +452,14 @@ pub const TypeChecker = struct {
             else => return error.TypeMismatch,
         };
 
-        const info = self.struct_types.get(struct_name) orelse return error.UndefinedType;
+        const info = self.type_registry.get(struct_name) orelse return error.UndefinedType;
+        const struct_type = switch (info) {
+            .struct_type => |s| s,
+            else => return error.TypeMismatch,
+        };
 
         // Look for field name in struct type
-        for (info.fields) |field| {
+        for (struct_type.fields) |field| {
             if (std.mem.eql(u8, field.name, field_access.name.lexeme)) {
                 return .{ .variable = .{ .pipe_type = field.pipe_type, .mutability = field.mutability } };
             }
@@ -508,8 +535,11 @@ pub const TypeChecker = struct {
             return pipe_type;
         }
 
-        if (self.struct_types.contains(name)) {
-            return .{ .struct_type = name };
+        if (self.type_registry.get(name)) |info| {
+            return switch (info) {
+                .struct_type => .{ .struct_type = name },
+                .union_type => .{ .union_type = name },
+            };
         }
 
         return error.UndefinedType;
@@ -550,6 +580,31 @@ pub const TypeChecker = struct {
                 } };
             },
         };
+    }
+
+    fn resolveFields(self: *TypeChecker, fields: []const ast.Statement.FieldDeclaration) ![]types.FieldInfo {
+        const resolved_fields = try self.allocator.alloc(types.FieldInfo, fields.len);
+        for (fields, 0..) |field, i| {
+            resolved_fields[i] = .{
+                .name = field.name.lexeme,
+                .pipe_type = try self.resolveTypeAnnotation(field.type_annotation),
+                .mutability = field.mutability,
+            };
+        }
+
+        return resolved_fields;
+    }
+
+    fn registerConstructor(self: *TypeChecker, name: []const u8, fields: []const types.FieldInfo, return_type: PipeType) !void {
+        const param_types = try self.allocator.alloc(PipeType, fields.len);
+        for (fields, 0..) |fi, i| {
+            param_types[i] = fi.pipe_type;
+        }
+
+        try self.env.define(name, .{ .function = .{
+            .param_types = param_types,
+            .return_type = return_type,
+        } });
     }
 
     // Register an error set in the error registry
