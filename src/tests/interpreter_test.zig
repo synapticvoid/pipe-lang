@@ -148,3 +148,58 @@ test "try unwraps ok value" {
         .{ "fn f() !Int { return 5; } fn g() !Int { return try f(); } g() catch { -1; };", "5" },
     });
 }
+
+// -- Structs
+
+test "case struct construction and field access" {
+    try expectEval(.{
+        .{ "case struct User(const id: Int, const name: String); const u = User(1, \"Alice\"); u.id;", "1" },
+        .{ "case struct User(const id: Int, const name: String); const u = User(1, \"Alice\"); u.name;", "\"Alice\"" },
+    });
+}
+
+test "case struct formatting" {
+    try expectEval(.{
+        .{ "case struct User(const id: Int, const name: String); User(1, \"Alice\");", "User(id=1, name=\"Alice\")" },
+    });
+}
+
+test "case struct equality is structural" {
+    try expectEval(.{
+        .{ "case struct Point(const x: Int, const y: Int); Point(1, 2) == Point(1, 2);", "true" },
+        .{ "case struct Point(const x: Int, const y: Int); Point(1, 2) == Point(3, 4);", "false" },
+        .{ "case struct Point(const x: Int, const y: Int); Point(1, 2) != Point(3, 4);", "true" },
+    });
+}
+
+test "plain struct formatting" {
+    try expectEval(.{
+        .{ "struct Session(const token: String); Session(\"abc\");", "<Session>" },
+    });
+}
+
+test "plain struct equality is by identity" {
+    try expectEval(.{
+        .{ "struct S(const x: Int); const a = S(1); const b = S(1); a == b;", "false" },
+        .{ "struct S(const x: Int); const a = S(1); a == a;", "true" },
+    });
+}
+
+test "struct field access in expressions" {
+    try expectEval(.{
+        .{ "case struct Point(const x: Int, const y: Int); const p = Point(3, 4); p.x + p.y;", "7" },
+    });
+}
+
+test "struct passed to function" {
+    try expectEval(.{
+        .{ "case struct Point(const x: Int, const y: Int); fn sum(p: Point) Int { p.x + p.y; } sum(Point(3, 4));", "7" },
+    });
+}
+
+test "struct print" {
+    try expectOutput(.{
+        .{ "case struct User(const id: Int, const name: String); print(User(1, \"Alice\"));", "User(id=1, name=\"Alice\")\n" },
+        .{ "struct Session(const token: String); print(Session(\"abc\"));", "<Session>\n" },
+    });
+}

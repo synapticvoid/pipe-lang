@@ -5,30 +5,30 @@
 Shortest path to error payloads without breaking changes later.
 Each phase is self-contained and testable.
 
-### Phase 1: Lexer foundation
-- [ ] Add `struct` keyword token
-- [ ] Add `union` keyword token
-- [ ] Add `case` keyword token
-- [ ] Add `when` keyword token (reserved for future pattern matching)
-- [ ] Add `self` keyword token (reserved for instance methods)
-- [ ] Add `Self` keyword token (reserved for self type annotation)
-- [ ] Add `.` (dot) single-character token
-- [ ] Tests: lex `struct`, `union`, `case`, `when`, `self`, `Self`, `.`
+### Phase 1: Lexer foundation ✅
+- [x] Add `struct` keyword token
+- [x] Add `union` keyword token
+- [x] Add `case` keyword token
+- [x] Add `when` keyword token (reserved for future pattern matching)
+- [x] Add `self` keyword token (reserved for instance methods)
+- [x] Add `Self` keyword token (reserved for self type annotation)
+- [x] Add `.` (dot) single-character token
+- [x] Tests: lex `struct`, `union`, `case`, `when`, `self`, `Self`, `.`
 
-### Phase 2: Struct (short form, no methods)
-- [ ] AST: `Statement.struct_declaration` (name, fields with mutability, case flag)
-- [ ] AST: `Expression.struct_init` (type name, field initializers with `=`)
-- [ ] AST: `Expression.field_access` (object expression, field name)
-- [ ] Parser: parse `struct Session(const user: User, var token: String);` (`;` terminates short form)
-- [ ] Parser: parse `case struct User(const id: Int, const name: String, var email: String);`
-- [ ] Parser: parse `User(1, "Alice", "alice@example.com")` as struct construction (positional args, parsed as call, disambiguated in type checker)
-- [ ] Parser: parse `expr.field` as dot access (uniform — field access, method calls, and qualified construction all parse the same; semantics resolved in type checker)
-- [ ] Types: add `PipeType.struct_type` (name → field descriptors + case flag)
-- [ ] Type checker: register struct types, check construction and field access
-- [ ] Interpreter: `Value.struct_instance`, evaluate construction and field access
-- [ ] `case struct`: auto-derived structural `==` and `toString` → `User(id=1, name=Alice, email=alice@example.com)`
-- [ ] Plain `struct`: identity `==` and `toString` → `<Session>`
-- [ ] Tests: declare, construct, access fields, print, compare (both case and plain)
+### Phase 2: Struct (short form, no methods) ✅
+- [x] AST: `Statement.struct_declaration` (name, fields with mutability, case flag)
+- [x] AST: `Expression.struct_init` (type name, field initializers with `=`)
+- [x] AST: `Expression.field_access` (object expression, field name)
+- [x] Parser: parse `struct Session(const user: User, var token: String);` (`;` terminates short form)
+- [x] Parser: parse `case struct User(const id: Int, const name: String, var email: String);`
+- [x] Parser: parse `User(1, "Alice", "alice@example.com")` as struct construction (positional args, parsed as call, disambiguated in type checker)
+- [x] Parser: parse `expr.field` as dot access (uniform — field access, method calls, and qualified construction all parse the same; semantics resolved in type checker)
+- [x] Types: add `PipeType.struct_type` (name → field descriptors + case flag)
+- [x] Type checker: register struct types, check construction and field access
+- [x] Interpreter: `Value.struct_instance`, evaluate construction and field access
+- [x] `case struct`: auto-derived structural `==` and `toString` → `User(id=1, name=Alice, email=alice@example.com)`
+- [x] Plain `struct`: identity `==` and `toString` → `<Session>`
+- [x] Tests: declare, construct, access fields, print, compare (both case and plain)
 
 ### Phase 3: Union
 - [ ] AST: `Statement.union_declaration` (name, variants with optional fields)
@@ -38,16 +38,20 @@ Each phase is self-contained and testable.
 - [ ] Type checker: validate union construction
 - [ ] Interpreter: evaluate union construction, support field access on variants
 - [ ] Unions are always structural: `==` compares variant tag + fields, `toString` shows `Role.Member(team=engineering)`
-- [ ] Union composition: `union AnyRole { StaffRole, Guest }` (flatten existing unions)
+- [ ] Union composition: `union AnyRole { StaffRole, Guest }` (nests existing unions as variants)
 - [ ] Tests: declare, construct, access variant fields, compare, compose unions
 
-### Phase 4: Error payloads
+### Phase 4: Error payloads & errors as values
 - [ ] Evolve error syntax: `error union UserError { NotFound(const id: Int), Unknown }`
 - [ ] Reuse union machinery — `error union` is a union that can appear in `!T` position
+- [ ] Errors as values: fallible functions return a result wrapper (`ok` / `error`), not a control-flow signal
+- [ ] `try expr` — unwrap success value, propagate error to caller
+- [ ] `expr catch |e| { ... }` — handle error inline
+- [ ] Type checker: bare call to fallible function without `try`, `catch`, or `when` is a compile error (see `plan_when.md`)
 - [ ] Variants with fields become struct-like payloads
-- [ ] Error values carry payload (accessible via field access after catch)
+- [ ] Error values carry payload (accessible via field access after catch/when)
 - [ ] Breaking change: migrate existing `error Name { V1, V2 }` to `error union`
-- [ ] Tests: error with payload, catch and access fields
+- [ ] Tests: error with payload, catch and access fields, unhandled error compile error
 
 ### Phase 5: Struct methods
 - [ ] AST: methods list in struct declaration (reuse `FnDeclaration`)
@@ -76,12 +80,17 @@ Each phase is self-contained and testable.
 - **Struct construction looks like a function call**: parsed as a call, disambiguated in the type checker
 - **Dot access is uniform**: `expr.name` is parsed the same for field access, method calls, and qualified variant construction — semantics resolved in the type checker
 - **Union variant fields use `var`/`const`**: same rule as struct fields — scripting pragmatism over FP purity
-- **Single `{}` syntax for unions**: no `|` composition — `union AppError { IOError, ValidationError }` flattens existing unions
+- **Union composition nests, not flattens**: `union AppError { UserError, ValidationError }` makes `UserError` a variant wrapping the inner union — enables grouped pattern matching (`AppError.UserError(_)` catches all user errors)
+- **Errors are values**: fallible functions return a result wrapper, not a control-flow signal. `try`, `catch`, and `when` are the three ways to handle them. Bare calls to fallible functions are compile errors.
 - **`error union` reuses union machinery**: an `error union` is a union that can appear in `!T` position — breaking change from existing `error Name { V1, V2 }`
 - **`when`, `self`, `Self` reserved now**: keywords added in Phase 1, used in later phases
 - **No `@identity` needed**: plain `struct` already provides identity semantics; `case struct` provides structural
 - **Declaration termination**: `}` if it has braces, `;` otherwise — no `};`
 - **`toString` / `equals`**: well-known method names, no special syntax
+- **`const` binding freezes everything**: a `const` binding prevents mutation of `var` fields — the binding controls mutability, not the field declaration. `var` fields are only mutable through a `var` binding.
+- **`when`**: see `plan_when.md` for full design (expression, exhaustive, works on any type)
+- **Implicit coercion for nested unions**: `const r: AnyRole = StaffRole.Admin;` works — a child union value can be assigned where a parent union is expected
+- **Generics**: planned for later, not in scope for these phases
 - **`const Self` for read-only methods**: `fn foo(self: const Self)` prevents mutation of `var` fields — like C++ `const` methods
 - **No `init` constructor**: computed defaults handle derived fields; `init {}` guard block (future) is validation-only, no `self`, no field assignment. Complex construction uses static methods.
 
@@ -123,14 +132,14 @@ union Role {
     Guest,
 }
 
-// Composing unions — flattens existing unions into one
+// Composing unions — nests existing unions as variants
 union StaffRole {
     Admin,
     Member(const team: String),
 }
 
 union AnyRole {
-    StaffRole,
+    StaffRole,   // nested: AnyRole.StaffRole wraps the StaffRole union
     Guest,
 }
 ```
@@ -139,13 +148,6 @@ union AnyRole {
 ```pipe
 const role = Role.Member("engineering");
 print(role.team);    // engineering
-
-// Pattern matching (future)
-when role {
-    Role.Admin -> print("admin"),
-    Role.Member(team) -> print(team),
-    Role.Guest -> print("guest"),
-}
 ```
 
 ### Error union
@@ -208,6 +210,26 @@ struct Session(const user: User, var token: String) {
 }
 ```
 
+### Error handling
+
+```pipe
+// Errors are values — three ways to handle a fallible call:
+
+// 1. try — unwrap or propagate to caller
+const user = try find_user(42);
+
+// 2. catch — handle inline
+const user = find_user(42) catch |e| {
+    print(e);
+    return;
+};
+
+// 3. when — see plan_when.md
+
+// Bare call to fallible function → compile error
+find_user(42);  // ERROR: error must be handled with try, catch, or when
+```
+
 ### Full example
 
 ```pipe
@@ -223,7 +245,7 @@ fn find_user(id: Int) UserError!User {
 }
 
 const user = find_user(42) catch |e| {
-    print(e.id);
+    print(e);
     return;
 };
 print(user);            // User(id=42, name=Alice, email=alice@example.com)

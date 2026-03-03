@@ -5,6 +5,7 @@ const RuntimeContext = @import("runtime.zig").RuntimeContext;
 pub const Callable = union(enum) {
     user: UserFn,
     builtin: BuiltinFn,
+    struct_constructor: StructConstructor,
 
     pub const UserFn = struct {
         declaration: ast.Statement.FnDeclaration,
@@ -16,5 +17,11 @@ pub const Callable = union(enum) {
 
         name: []const u8,
         func: Func,
+    };
+
+    pub const StructConstructor = struct {
+        name: []const u8,
+        field_names: []const []const u8,
+        kind: ast.StructKind,
     };
 };

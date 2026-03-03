@@ -45,3 +45,64 @@ test "tokenize comparison operators" {
 
     try std.testing.expectEqualDeep(&expected, tokens);
 }
+
+test "tokenize type system keywords" {
+    const allocator = std.testing.allocator;
+    var lexer = Lexer.init("struct union case when self Self", allocator);
+    defer lexer.deinit();
+
+    const tokens = try lexer.tokenize();
+
+    const expected = [_]Token{
+        .{ .type = .@"struct", .lexeme = "struct", .line = 1 },
+        .{ .type = .@"union", .lexeme = "union", .line = 1 },
+        .{ .type = .case, .lexeme = "case", .line = 1 },
+        .{ .type = .when, .lexeme = "when", .line = 1 },
+        .{ .type = .self, .lexeme = "self", .line = 1 },
+        .{ .type = .self_type, .lexeme = "Self", .line = 1 },
+        .{ .type = .eof, .lexeme = "", .line = 1 },
+    };
+
+    try std.testing.expectEqualDeep(&expected, tokens);
+}
+
+test "tokenize dot access" {
+    const allocator = std.testing.allocator;
+    var lexer = Lexer.init("user.name", allocator);
+    defer lexer.deinit();
+
+    const tokens = try lexer.tokenize();
+
+    const expected = [_]Token{
+        .{ .type = .identifier, .lexeme = "user", .line = 1 },
+        .{ .type = .dot, .lexeme = ".", .line = 1 },
+        .{ .type = .identifier, .lexeme = "name", .line = 1 },
+        .{ .type = .eof, .lexeme = "", .line = 1 },
+    };
+
+    try std.testing.expectEqualDeep(&expected, tokens);
+}
+
+test "tokenize case struct declaration" {
+    const allocator = std.testing.allocator;
+    var lexer = Lexer.init("case struct User(const id: Int);", allocator);
+    defer lexer.deinit();
+
+    const tokens = try lexer.tokenize();
+
+    const expected = [_]Token{
+        .{ .type = .case, .lexeme = "case", .line = 1 },
+        .{ .type = .@"struct", .lexeme = "struct", .line = 1 },
+        .{ .type = .identifier, .lexeme = "User", .line = 1 },
+        .{ .type = .lparen, .lexeme = "(", .line = 1 },
+        .{ .type = .@"const", .lexeme = "const", .line = 1 },
+        .{ .type = .identifier, .lexeme = "id", .line = 1 },
+        .{ .type = .colon, .lexeme = ":", .line = 1 },
+        .{ .type = .identifier, .lexeme = "Int", .line = 1 },
+        .{ .type = .rparen, .lexeme = ")", .line = 1 },
+        .{ .type = .semicolon, .lexeme = ";", .line = 1 },
+        .{ .type = .eof, .lexeme = "", .line = 1 },
+    };
+
+    try std.testing.expectEqualDeep(&expected, tokens);
+}

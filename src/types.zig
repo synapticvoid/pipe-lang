@@ -1,6 +1,8 @@
 const std = @import("std");
 const activeTag = std.meta.activeTag;
 
+const ast = @import("ast.zig");
+
 pub const PipeType = union(enum) {
     int,
     float,
@@ -8,6 +10,10 @@ pub const PipeType = union(enum) {
     string,
     unit,
     any,
+
+    // Structs
+
+    struct_type: []const u8,
 
     // Errors
 
@@ -31,7 +37,11 @@ pub const PipeType = union(enum) {
     pub fn compatible(self: PipeType, other: PipeType) bool {
         const self_tag = activeTag(self);
         const other_tag = activeTag(other);
+
         if (self_tag == other_tag) {
+            if (self_tag == .struct_type) {
+                return std.mem.eql(u8, self.struct_type, other.struct_type);
+            }
             return true;
         }
 
@@ -64,4 +74,15 @@ pub const PipeType = union(enum) {
         _ = other;
         return false;
     }
+};
+
+pub const StructTypeInfo = struct {
+    fields: []const FieldInfo,
+    kind: ast.StructKind,
+};
+
+pub const FieldInfo = struct {
+    name: []const u8,
+    pipe_type: PipeType,
+    mutability: ast.Mutability,
 };

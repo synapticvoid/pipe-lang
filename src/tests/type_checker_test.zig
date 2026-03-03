@@ -131,3 +131,57 @@ test "catch on non-fallible expression is rejected" {
         \\fn safe(a: Int, b: Int) Int { add(a, b) catch { 0; }; }
     );
 }
+
+// -- Structs
+
+test "struct declaration is valid" {
+    try expectTypeCheck("struct Session(const token: String);");
+    try expectTypeCheck("case struct User(const id: Int, const name: String);");
+}
+
+test "struct construction type checks" {
+    try expectTypeCheck(
+        \\case struct User(const id: Int, const name: String);
+        \\const u = User(1, "Alice");
+    );
+}
+
+test "struct construction wrong arg count rejected" {
+    try expectTypeError(
+        \\case struct User(const id: Int, const name: String);
+        \\const u = User(1);
+    );
+}
+
+test "struct construction wrong arg type rejected" {
+    try expectTypeError(
+        \\case struct User(const id: Int, const name: String);
+        \\const u = User("wrong", "Alice");
+    );
+}
+
+test "struct field access type checks" {
+    try expectTypeCheck(
+        \\case struct User(const id: Int, const name: String);
+        \\const u = User(1, "Alice");
+        \\const n: String = u.name;
+    );
+}
+
+test "struct field access unknown field rejected" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const result = helpers.typeCheck(
+        \\case struct User(const id: Int);
+        \\const u = User(1);
+        \\const x = u.unknown;
+    , arena.allocator());
+    try std.testing.expectError(error.UndefinedField, result);
+}
+
+test "struct used as field type" {
+    try expectTypeCheck(
+        \\case struct User(const id: Int);
+        \\struct Session(const user: User, var token: String);
+    );
+}

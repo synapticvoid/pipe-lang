@@ -50,3 +50,55 @@ test "parse comparison and equality precedence" {
     // right side: 4
     try std.testing.expectEqual(@as(i64, 4), eq.right.literal.value.int);
 }
+
+test "parse struct declaration" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const result = try helpers.parse("struct Session(const user: Int, var token: Int);", allocator);
+
+    const decl = result[0].struct_declaration;
+    try std.testing.expectEqualStrings("Session", decl.name.lexeme);
+    try std.testing.expectEqual(.plain, decl.kind);
+    try std.testing.expectEqual(@as(usize, 2), decl.fields.len);
+    try std.testing.expectEqualStrings("user", decl.fields[0].name.lexeme);
+    try std.testing.expectEqual(.constant, decl.fields[0].mutability);
+    try std.testing.expectEqualStrings("token", decl.fields[1].name.lexeme);
+    try std.testing.expectEqual(.mutable, decl.fields[1].mutability);
+}
+
+test "parse case struct declaration" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const result = try helpers.parse("case struct User(const id: Int, const name: String);", allocator);
+
+    const decl = result[0].struct_declaration;
+    try std.testing.expectEqualStrings("User", decl.name.lexeme);
+    try std.testing.expectEqual(.case, decl.kind);
+    try std.testing.expectEqual(@as(usize, 2), decl.fields.len);
+}
+
+test "parse dot access" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const result = try helpers.parse("user.name;", allocator);
+
+    const fa = result[0].expression.field_access;
+    try std.testing.expectEqualStrings("user", fa.object.variable.token.lexeme);
+    try std.testing.expectEqualStrings("name", fa.name.lexeme);
+}
+
+test "parse chained dot access" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const result = try helpers.parse("a.b.c;", allocator);
+
+    const outer = result[0].expression.field_access;
+    try std.testing.expectEqualStrings("c", outer.name.lexeme);
+    const inner = outer.object.field_access;
+    try std.testing.expectEqualStrings("b", inner.name.lexeme);
+    try std.testing.expectEqualStrings("a", inner.object.variable.token.lexeme);
+}

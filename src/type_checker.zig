@@ -23,6 +23,7 @@ const FnSignature = struct {
 
 const TypeCheckError = error{
     TypeMismatch,
+    UndefinedField,
     UndefinedVariable,
     UndefinedType,
     ConstReassignment,
@@ -70,6 +71,10 @@ pub const TypeChecker = struct {
     // name -> error variant identifier
     error_sets: std.StringHashMap([]const []const u8),
 
+    // Looko up table to match struct types
+    // name -> struct type
+    struct_types: std.StringHashMap(types.StructTypeInfo),
+
     // Last type checker error message
     last_error: ?[]const u8 = null,
 
@@ -85,6 +90,7 @@ pub const TypeChecker = struct {
         return .{
             .env = env,
             .error_sets = std.StringHashMap([]const []const u8).init(allocator),
+            .struct_types = std.StringHashMap(types.StructTypeInfo).init(allocator),
             .allocator = allocator,
         };
     }
@@ -111,6 +117,7 @@ pub const TypeChecker = struct {
                 .@"return" => |ret| last_type = try self.checkReturnStatement(ret),
                 .error_declaration => |decl| try self.registerErrorSet(decl),
                 .error_union_declaration => |decl| try self.registerErrorUnion(decl),
+                .struct_declaration => |decl| try self.checkStructDeclarationStatement(decl),
             }
         }
 
@@ -212,6 +219,35 @@ pub const TypeChecker = struct {
         return return_type;
     }
 
+    fn checkStructDeclarationStatement(self: *TypeChecker, decl: ast.Statement.StructDeclaration) !void {
+        // Check fields info
+        const resolved_fields = try self.allocator.alloc(types.FieldInfo, decl.fields.len);
+        for (decl.fields, 0..) |field, i| {
+            resolved_fields[i] = .{
+                .name = field.name.lexeme,
+                .pipe_type = try self.resolveTypeAnnotation(field.type_annotation),
+                .mutability = field.mutability,
+            };
+        }
+
+        // Declare the struct in the registry
+        try self.struct_types.put(decl.name.lexeme, .{
+            .fields = resolved_fields,
+            .kind = decl.kind,
+        });
+
+        // Register constructor as a function
+        const param_types = try self.allocator.alloc(PipeType, decl.fields.len);
+        for (resolved_fields, 0..) |fi, i| {
+            param_types[i] = fi.pipe_type;
+        }
+
+        try self.env.define(decl.name.lexeme, .{ .function = .{
+            .param_types = param_types,
+            .return_type = .{ .struct_type = decl.name.lexeme },
+        } });
+    }
+
     // NOTE: -- Expressions
 
     fn checkExpression(self: *TypeChecker, expr: ast.Expression) TypeCheckError!TypeInfo {
@@ -229,6 +265,8 @@ pub const TypeChecker = struct {
                 const block_type = try self.checkBody(blk.statements);
                 return .{ .variable = .{ .pipe_type = block_type, .mutability = .constant } };
             },
+            .struct_init => |in| try self.checkInit(in),
+            .field_access => |fa| self.checkFieldAccess(fa),
         };
     }
 
@@ -238,7 +276,7 @@ pub const TypeChecker = struct {
             .int => .int,
             .string => .string,
             .null, .unit, .error_value => .unit,
-            .function => return error.TypeMismatch,
+            .function, .struct_instance => return error.TypeMismatch,
         };
         return .{ .variable = .{ .pipe_type = pipe_type, .mutability = .constant } };
     }
@@ -365,6 +403,44 @@ pub const TypeChecker = struct {
         return .{ .variable = .{ .pipe_type = sig.return_type, .mutability = .constant } };
     }
 
+    fn checkInit(self: *TypeChecker, init_expr: *ast.Expression.StructInit) TypeCheckError!TypeInfo {
+        const info = self.struct_types.get(init_expr.name.lexeme) orelse return error.UndefinedType;
+
+        if (init_expr.args.len != info.fields.len) {
+            return self.fail(error.TypeMismatch, "Wrong number of arguments: expected {d}, got {d}", .{ info.fields.len, init_expr.args.len });
+        }
+
+        // Compare args and field types
+        for (init_expr.args, info.fields, 0..) |arg, field, i| {
+            const arg_type = try expectType(try self.checkExpression(arg));
+            if (!arg_type.compatible(field.pipe_type)) {
+                return self.fail(error.TypeMismatch, "Type mismatch: argument {d} expected {s}, got {s}", .{ i + 1, @tagName(field.pipe_type), @tagName(arg_type) });
+            }
+        }
+
+        return .{ .variable = .{ .pipe_type = .{ .struct_type = init_expr.name.lexeme }, .mutability = .constant } };
+    }
+
+    fn checkFieldAccess(self: *TypeChecker, field_access: *ast.Expression.FieldAccess) TypeCheckError!TypeInfo {
+        const obj_type = try expectType(try self.checkExpression(field_access.object));
+
+        const struct_name = switch (obj_type) {
+            .struct_type => |name| name,
+            else => return error.TypeMismatch,
+        };
+
+        const info = self.struct_types.get(struct_name) orelse return error.UndefinedType;
+
+        // Look for field name in struct type
+        for (info.fields) |field| {
+            if (std.mem.eql(u8, field.name, field_access.name.lexeme)) {
+                return .{ .variable = .{ .pipe_type = field.pipe_type, .mutability = field.mutability } };
+            }
+        }
+
+        return self.fail(error.UndefinedField, "Undefined field '{s}'", .{field_access.name.lexeme});
+    }
+
     fn checkTry(self: *TypeChecker, try_expr: *ast.Expression.Try) !TypeInfo {
         const inner = try expectType(try self.checkExpression(try_expr.expression));
         if (!inner.isFallible()) {
@@ -427,12 +503,16 @@ pub const TypeChecker = struct {
     }
 
     // Look up a type name (e.g. "Int") and return the corresponding PipeType.
-    fn resolveTypeName(name: []const u8) !PipeType {
+    fn resolveTypeName(self: *TypeChecker, name: []const u8) !PipeType {
         if (type_names.get(name)) |pipe_type| {
             return pipe_type;
-        } else {
-            return error.UndefinedType;
         }
+
+        if (self.struct_types.contains(name)) {
+            return .{ .struct_type = name };
+        }
+
+        return error.UndefinedType;
     }
 
     const type_names = std.StaticStringMap(PipeType).initComptime(.{
@@ -445,7 +525,7 @@ pub const TypeChecker = struct {
 
     fn resolveTypeAnnotation(self: *TypeChecker, ann: ast.PipeTypeAnnotation) !PipeType {
         return switch (ann) {
-            .named => |tok| try resolveTypeName(tok.lexeme),
+            .named => |tok| try self.resolveTypeName(tok.lexeme),
             .inferred_error_union => |inner| {
                 // Find the ok type
                 const ok_type = try self.allocator.create(PipeType);

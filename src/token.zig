@@ -9,6 +9,7 @@ pub const TokenType = enum {
     colon,
     semicolon,
     comma,
+    dot,
     minus,
     plus,
     slash,
@@ -32,6 +33,7 @@ pub const TokenType = enum {
 
     // Keywords
     @"and",
+    case,
     @"catch",
     @"const",
     @"else",
@@ -43,9 +45,14 @@ pub const TokenType = enum {
     null,
     @"or",
     @"return",
+    self,
+    self_type,
+    @"struct",
     true,
     @"try",
+    @"union",
     @"var",
+    when,
     @"while",
 
     eof,
@@ -56,6 +63,7 @@ pub const TokenType = enum {
 
     const keywords = std.StaticStringMap(TokenType).initComptime(.{
         .{ "and", .@"and" },
+        .{ "case", .case },
         .{ "catch", .@"catch" },
         .{ "const", .@"const" },
         .{ "else", .@"else" },
@@ -66,11 +74,16 @@ pub const TokenType = enum {
         .{ "if", .@"if" },
         .{ "null", .null },
         .{ "or", .@"or" },
+        .{ "self", .self },
+        .{ "Self", .self_type },
+        .{ "struct", .@"struct" },
         .{ "return", .@"return" },
         .{ "true", .true },
+        .{ "union", .@"union" },
         .{ "try", .@"try" },
         .{ "var", .@"var" },
         .{ "while", .@"while" },
+        .{ "when", .when },
     });
 };
 
