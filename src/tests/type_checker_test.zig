@@ -220,3 +220,27 @@ test "union variant field access type checks" {
         \\const t: String = r.team;
     );
 }
+
+test "union composition declaration and explicit construction type checks" {
+    try expectTypeCheck(
+        \\union StaffRole { Admin, Member(const team: String), }
+        \\union AnyRole { StaffRole, Guest, }
+        \\const r = AnyRole.StaffRole(StaffRole.Admin());
+    );
+}
+
+test "union composition implicit coercion type checks" {
+    try expectTypeCheck(
+        \\union StaffRole { Admin, Member(const team: String), }
+        \\union AnyRole { StaffRole, Guest, }
+        \\const r: AnyRole = StaffRole.Admin();
+    );
+}
+
+test "union composition wrong type rejected" {
+    try expectTypeError(
+        \\union StaffRole { Admin, }
+        \\union AnyRole { StaffRole, Guest, }
+        \\const r: AnyRole = 42;
+    );
+}

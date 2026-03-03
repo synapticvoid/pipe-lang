@@ -135,7 +135,7 @@ pub const TypeChecker = struct {
 
             if (decl.type_annotation) |annotation| {
                 const annotated = try self.resolveTypeAnnotation(annotation);
-                if (!inferred.compatible(annotated)) {
+                if (!inferred.compatible(annotated) and !self.isNestedUnionCoercible(inferred, annotated)) {
                     return self.fail(error.TypeMismatch, "Type mismatch: '{s}' declared as {s}, got {s} at line {d}", .{ decl.name.lexeme, @tagName(annotated), @tagName(inferred), line });
                 } else {
                     resolved_type = inferred;
@@ -236,18 +236,33 @@ pub const TypeChecker = struct {
     }
 
     fn checkUnionDeclarationStatement(self: *TypeChecker, decl: ast.Statement.UnionDeclaration) !void {
-        // Check variants
         var resolved_variants = try self.allocator.alloc(types.VariantTypeInfo, decl.variants.len);
         for (decl.variants, 0..) |variant, i| {
-            const resolved_fields = try self.resolveFields(variant.fields);
+            // If this is a zero-field variant whose name matches an existing union,
+            // treat it as a nested union: synthesize a single field wrapping the inner type.
+            const fields: []types.FieldInfo = blk: {
+                if (variant.fields.len != 0) break :blk null;
+                const info = self.type_registry.get(variant.name.lexeme) orelse break :blk null;
+                switch (info) {
+                    .union_type => {
+                        const synthetic = try self.allocator.alloc(types.FieldInfo, 1);
+                        synthetic[0] = .{
+                            .name = variant.name.lexeme,
+                            .pipe_type = .{ .union_type = variant.name.lexeme },
+                            .mutability = .constant,
+                        };
+                        break :blk synthetic;
+                    },
+                    else => break :blk null,
+                }
+            } orelse try self.resolveFields(variant.fields);
 
-            // variant constructor name is Union.VariantName
             const variant_name = try utils.qualifiedName(self.allocator, decl.name.lexeme, variant.name.lexeme);
-            try self.registerConstructor(variant_name, resolved_fields, .{ .union_type = decl.name.lexeme });
+            try self.registerConstructor(variant_name, fields, .{ .union_type = decl.name.lexeme });
 
             resolved_variants[i] = .{
                 .name = variant.name.lexeme,
-                .fields = resolved_fields,
+                .fields = fields,
             };
         }
 
@@ -449,23 +464,35 @@ pub const TypeChecker = struct {
 
         const struct_name = switch (obj_type) {
             .struct_type => |name| name,
+            .union_type => |name| name,
             else => return error.TypeMismatch,
         };
 
         const info = self.type_registry.get(struct_name) orelse return error.UndefinedType;
-        const struct_type = switch (info) {
-            .struct_type => |s| s,
-            else => return error.TypeMismatch,
+        return switch (info) {
+            .struct_type => |s| {
+                // Look for field name in struct type
+                for (s.fields) |field| {
+                    if (std.mem.eql(u8, field.name, field_access.name.lexeme)) {
+                        return .{ .variable = .{ .pipe_type = field.pipe_type, .mutability = field.mutability } };
+                    }
+                }
+
+                return self.fail(error.UndefinedField, "Undefined field '{s}'", .{field_access.name.lexeme});
+            },
+            .union_type => |u| {
+                // Look for variant field names (nested for)
+                for (u.variants) |variant| {
+                    for (variant.fields) |field| {
+                        if (std.mem.eql(u8, field.name, field_access.name.lexeme)) {
+                            return .{ .variable = .{ .pipe_type = field.pipe_type, .mutability = field.mutability } };
+                        }
+                    }
+                }
+
+                return self.fail(error.UndefinedType, "Undefined variant '{s}'", .{field_access.name.lexeme});
+            },
         };
-
-        // Look for field name in struct type
-        for (struct_type.fields) |field| {
-            if (std.mem.eql(u8, field.name, field_access.name.lexeme)) {
-                return .{ .variable = .{ .pipe_type = field.pipe_type, .mutability = field.mutability } };
-            }
-        }
-
-        return self.fail(error.UndefinedField, "Undefined field '{s}'", .{field_access.name.lexeme});
     }
 
     fn checkTry(self: *TypeChecker, try_expr: *ast.Expression.Try) !TypeInfo {
@@ -605,6 +632,38 @@ pub const TypeChecker = struct {
             .param_types = param_types,
             .return_type = return_type,
         } });
+    }
+
+    // Returns true if `from` can be implicitly coerced into `to`.
+    // This happens when `to` is a composed union that has `from` as a nested variant,
+    // e.g. `union AnyRole { StaffRole, Guest }` makes StaffRole coercible to AnyRole.
+    fn isNestedUnionCoercible(self: *TypeChecker, from: PipeType, to: PipeType) bool {
+        // Both must be union types — primitives and structs don't participate in this coercion.
+        if (from != .union_type or to != .union_type) {
+            return false;
+        }
+
+        // Look up the target union in the registry to get its variant list.
+        const to_name = to.union_type;
+        const info = self.type_registry.get(to_name) orelse return false;
+        const to_info = switch (info) {
+            .union_type => |u| u,
+            else => return false,
+        };
+
+        // A nested union variant is stored as a single synthetic field whose pipe_type
+        // is the inner union type. Check if any variant field matches `from`.
+        for (to_info.variants) |variant| {
+            for (variant.fields) |field| {
+                // TODO: Recurse into a nested union variants once when with exhaustive
+                // matching is implemented
+                if (field.pipe_type.compatible(from)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     // Register an error set in the error registry

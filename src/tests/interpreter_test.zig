@@ -222,3 +222,39 @@ test "union variant print" {
         .{ "union Role { Admin, Member(const team: String), } print(Role.Member(\"eng\"));", "Role.Member(team=\"eng\")\n" },
     });
 }
+
+test "union equality is structural" {
+    try expectEval(.{
+        .{ "union Role { Admin, Member(const team: String), } Role.Admin() == Role.Admin();", "true" },
+        .{ "union Role { Admin, Member(const team: String), } Role.Member(\"eng\") == Role.Member(\"eng\");", "true" },
+        .{ "union Role { Admin, Member(const team: String), } Role.Member(\"eng\") == Role.Member(\"other\");", "false" },
+        .{ "union Role { Admin, Member(const team: String), } Role.Admin() == Role.Member(\"eng\");", "false" },
+    });
+}
+
+test "union composition explicit construction" {
+    try expectEval(.{
+        .{ "union StaffRole { Admin, Member(const team: String), } union AnyRole { StaffRole, Guest, } AnyRole.StaffRole(StaffRole.Admin());", "AnyRole.StaffRole(StaffRole=StaffRole.Admin())" },
+        .{ "union StaffRole { Admin, Member(const team: String), } union AnyRole { StaffRole, Guest, } AnyRole.StaffRole(StaffRole.Member(\"eng\"));", "AnyRole.StaffRole(StaffRole=StaffRole.Member(team=\"eng\"))" },
+    });
+}
+
+test "union composition implicit coercion" {
+    try expectEval(.{
+        .{ "union StaffRole { Admin, } union AnyRole { StaffRole, Guest, } const r: AnyRole = StaffRole.Admin(); r;", "StaffRole.Admin()" },
+    });
+}
+
+test "union composition equality" {
+    try expectEval(.{
+        .{ "union StaffRole { Admin, } union AnyRole { StaffRole, Guest, } const a: AnyRole = StaffRole.Admin(); const b: AnyRole = StaffRole.Admin(); a == b;", "true" },
+        .{ "union StaffRole { Admin, Guest, } union AnyRole { StaffRole, } const a: AnyRole = StaffRole.Admin(); const b: AnyRole = StaffRole.Guest(); a == b;", "false" },
+    });
+}
+
+test "union composition print" {
+    try expectOutput(.{
+        .{ "union StaffRole { Admin, } union AnyRole { StaffRole, Guest, } print(AnyRole.StaffRole(StaffRole.Admin()));", "AnyRole.StaffRole(StaffRole=StaffRole.Admin())\n" },
+        .{ "union StaffRole { Admin, } union AnyRole { StaffRole, Guest, } print(AnyRole.Guest());", "AnyRole.Guest()\n" },
+    });
+}

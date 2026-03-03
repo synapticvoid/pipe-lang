@@ -29,6 +29,8 @@ pub const InterpreterError = error{
 
 pub const Interpreter = struct {
     env: *Environment,
+    // Lookup registry to match union name (used for type coercion)
+    known_union_names: std.StringHashMap(void),
     ctx: RuntimeContext,
     return_value: ?Value = null,
     error_value: ?Value = null,
@@ -41,6 +43,7 @@ pub const Interpreter = struct {
 
         return .{
             .env = env,
+            .known_union_names = std.StringHashMap(void).init(allocator),
             .ctx = ctx,
             .allocator = allocator,
         };
@@ -105,10 +108,22 @@ pub const Interpreter = struct {
 
     fn executeUnionDeclaration(self: *Interpreter, decl: ast.Statement.UnionDeclaration) !void {
         for (decl.variants) |variant| {
-            const field_names = try self.allocator.alloc([]const u8, variant.fields.len);
-            for (variant.fields, 0..) |field, i| {
-                field_names[i] = field.name.lexeme;
-            }
+            const field_names: [][]const u8 = blk: {
+                // Branch when we reference an existing union
+                if (variant.fields.len != 0) break :blk null;
+                if (!self.known_union_names.contains(variant.name.lexeme)) break :blk null;
+
+                // Create a single-field variant for the constructor
+                const names = try self.allocator.alloc([]const u8, 1);
+                names[0] = variant.name.lexeme;
+                break :blk names;
+            } orelse blk: {
+                const names = try self.allocator.alloc([]const u8, variant.fields.len);
+                for (variant.fields, 0..) |field, i| {
+                    names[i] = field.name.lexeme;
+                }
+                break :blk names;
+            };
 
             const constructor_name = try utils.qualifiedName(self.allocator, decl.name.lexeme, variant.name.lexeme);
             try self.env.define(constructor_name, .{ .function = .{ .struct_constructor = .{
@@ -117,6 +132,9 @@ pub const Interpreter = struct {
                 .kind = .case,
             } } });
         }
+
+        // Don't forget to add the union to our known union names
+        try self.known_union_names.put(decl.name.lexeme, {});
     }
 
     // NOTE: -- Expressions
