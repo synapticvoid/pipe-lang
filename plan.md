@@ -56,12 +56,23 @@ Each phase is self-contained and testable.
 - [ ] Parser: `error enum Name { ... }` → sets `is_error = true`, otherwise identical to `enum`
 - [ ] Parser: `try expr`, `expr catch |e| { ... }`
 - [ ] Types: add `is_error: bool` to `EnumTypeInfo` — no new type variant needed
+- [ ] Types: remove vestigial `PipeType.error_set` and `PipeType.error_union` — superseded by synthesized enum
 - [ ] Type checker: propagate `is_error` when registering; enforce that composed variants inside an `error enum` are themselves `error enum`s
 - [ ] Type checker: validate `!T` error side must be an `is_error` enum
-- [ ] Type checker: bare call to fallible function without `try`, `catch`, or `when` is a compile error
+- [ ] Type checker: `E!T` synthesizes a concrete `EnumTypeInfo` with two variants — `Ok` (fields: `[T]`) and `Error` (fields: `[E]`) — no new PipeType variant needed
+- [ ] Type checker: `!T` is a first-class type — a `!T` value cannot be used where `T` is expected without unwrapping via `try`, `catch`, or `when`
+- [ ] Type checker: discarding a `!T` result with no binding (`foo();`) is a compile error; explicit discard (`const _ = foo()`) is allowed
+- [ ] Type checker: scope-level pending-set tracking — each scope maintains a set of unresolved `!T` bindings; all must be consumed before scope exit
+- [ ] Type checker: branch merge — each branch of `if`/`when` gets a copy of the pending set; both branches must consume the same bindings at the merge point
+- [ ] Type checker: early exit (`return`, `break`, `continue`) — all pending `!T` bindings must be consumed before the exit point
+- [ ] Type checker: reassignment — overwriting a `var` binding holding an unconsumed `!T` is a compile error
+- [ ] Type checker: loop body — pending `!T` bindings must be consumed before `break`, `continue`, or looping back
+- [ ] Type checker: consumption — `try`, `catch`, `when`, `return res`, passing as argument, and rebinding (`const other = res`) all consume a `!T` binding; rebinding transfers the obligation to the new name
 - [ ] Type checker: `try` — caller must also return `!T`, propagates error type upward
-- [ ] Interpreter: `try` — unwrap ok value or propagate error; `catch` — bind error value, execute handler
-- [ ] Tests: declare error enum, catch and access fields, unhandled error compile error, composed error enums
+- [ ] Interpreter: `!T` values are `Value.enum_instance` — `Ok` variant wraps the success value, `Error` variant wraps the error; no new Value variants needed
+- [ ] Interpreter: `try` — match on `Ok`/`Error` variant, unwrap or propagate; `catch` — match on `Ok`/`Error`, unwrap or bind and execute handler
+- [ ] Interpreter: `value =>` / `error =>` arms in `when` are sugar for matching `Ok` / `Error` variants
+- [ ] Tests: declare error enum, catch and access fields, deferred binding (`const res = foo(); when (res) { ... }`), unconsumed binding errors, branch merge errors, reassignment error, composed error enums
 
 ### Phase 5: Struct methods
 - [ ] AST: methods list in struct declaration (reuse `FnDeclaration`)
@@ -92,7 +103,9 @@ Each phase is self-contained and testable.
 - **Dot access is uniform**: `expr.name` is parsed the same for field access, method calls, and qualified variant construction — semantics resolved in the type checker
 - **Union variant fields use `var`/`const`**: same rule as struct fields — scripting pragmatism over FP purity
 - **Enum composition nests, not flattens**: `enum AppError { UserError, ValidationError }` makes `UserError` a variant wrapping the inner enum — enables grouped pattern matching (`AppError.UserError(_)` catches all user errors)
-- **Errors are values**: fallible functions return a result wrapper, not a control-flow signal. `try`, `catch`, and `when` are the three ways to handle them. Bare calls to fallible functions are compile errors.
+- **Errors are values**: fallible functions return a result wrapper, not a control-flow signal. `try`, `catch`, and `when` are the three ways to handle them. Enforcement is at the type level, not the call site — a `!T` value cannot be used as `T` without unwrapping.
+- **`!T` is a synthesized enum**: `E!T` is syntax sugar — the type checker synthesizes a concrete `EnumTypeInfo` with `Ok(T)` and `Error(E)` variants. No new PipeType variant needed; all enum machinery (dispatch, `when` matching, interpreter values) works as-is. `value =>` / `error =>` arm syntax in `when` is sugar for matching `Ok` / `Error` variants.
+- **`!T` consumption is tracked**: the type checker maintains a pending-set of unresolved `!T` bindings per scope. All bindings must be consumed (via `try`, `catch`, `when`, `return`, passing as argument, or rebinding) before scope exit, branch merge, or early exit. Discarding a `!T` result with no binding is a compile error. Reassigning over an unconsumed `!T` binding is a compile error.
 - **`error enum` reuses enum machinery**: an `error enum` is an enum with `is_error: bool` set — no new type variant, no parallel registry path. Only difference: can appear in `!T` position, and composed variants must themselves be `error enum`s.
 - **`is_error` is a marker, not a kind**: analogous to Swift's `Error` protocol conformance or Kotlin's sealed modifier — a boolean flag on `EnumTypeInfo`, not a separate type kind. A kind enum would be over-engineering for a single distinction.
 - **Vestigial `error_set` / `error_union` removed**: predated the enum infrastructure; superseded by `is_error` on `EnumTypeInfo`.
@@ -227,9 +240,9 @@ struct Session(const user: User, var token: String) {
 ### Error handling
 
 ```pipe
-// Errors are values — three ways to handle a fallible call:
+// Errors are values — three ways to unwrap a !T:
 
-// 1. try — unwrap or propagate to caller
+// 1. try — unwrap or propagate to caller (caller must also return !T)
 const user = try find_user(42);
 
 // 2. catch — handle inline
@@ -239,9 +252,32 @@ const user = find_user(42) catch |e| {
 };
 
 // 3. when — see plan_when.md
+when (find_user(42)) {
+    user  => print(user.name),
+    error => print("failed"),
+}
 
-// Bare call to fallible function → compile error
-find_user(42);  // ERROR: error must be handled with try, catch, or when
+// !T can be bound and handled later — res has type !User
+const res = find_user(42);
+when (res) {
+    user  => print(user.name),
+    error => print("failed"),
+}
+
+// Discarding a !T result with no binding → compile error
+find_user(42);       // ERROR: result discarded
+const _ = find_user(42);  // OK — explicit discard
+
+// Unconsumed !T binding → compile error
+const res = find_user(42);
+// scope ends here without consuming res → ERROR
+
+// Partial handling → compile error
+const res = find_user(42);
+if (cond) {
+    when (res) { ... }  // consumed in this branch
+}
+// else branch does not consume res → ERROR
 ```
 
 ### Full example
