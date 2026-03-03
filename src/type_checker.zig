@@ -192,17 +192,18 @@ pub const TypeChecker = struct {
         self.expected_return_type = return_type;
         defer self.expected_return_type = previous_return_type;
 
+        // Register the function signature in the enclosing environment *before*
+        // checking the body so recursive calls can resolve the function.
+        try previous.define(decl.name.lexeme, .{ .function = .{
+            .param_types = param_types,
+            .return_type = return_type,
+        } });
+
         // Check the body
         const body_type = try self.checkBody(decl.body);
         if (!self.isCompatible(body_type, return_type)) {
             return self.fail(error.TypeMismatch, "Type mismatch: function '{s}' should return {s}, got {s} at line {d}", .{ decl.name.lexeme, @tagName(return_type), @tagName(body_type), decl.name.line });
         }
-
-        // Save the function signature to the *enclosing* environment
-        try previous.define(decl.name.lexeme, .{ .function = .{
-            .param_types = param_types,
-            .return_type = return_type,
-        } });
     }
 
     fn checkReturnStatement(self: *TypeChecker, ret: ast.Statement.Return) TypeCheckError!PipeType {
