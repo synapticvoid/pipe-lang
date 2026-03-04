@@ -70,9 +70,9 @@ Each phase is self-contained and testable.
 - [ ] Type checker: loop body — pending `!T` bindings must be consumed before `break`, `continue`, or looping back
 - [ ] Type checker: consumption — `try`, `catch`, `when`, `return res`, passing as argument, and rebinding (`const other = res`) all consume a `!T` binding; rebinding transfers the obligation to the new name
 - [x] Interpreter: `!T` values are `Value.enum_instance` — `Ok` variant wraps the success value, `Err` variant wraps the error; no new Value variants needed; `result_name` computed in `executeFnDeclarationStatement`
-- [ ] Interpreter: `try` — match on `Ok`/`Err` variant, unwrap or propagate; `catch` — match on `Ok`/`Err`, unwrap or bind and execute handler (stubbed as `NotImplemented`)
+- [x] Interpreter: `try` — match on `Ok`/`Err` variant, unwrap or propagate; `catch` — match on `Ok`/`Err`, unwrap or bind and execute handler (stubbed as `NotImplemented`)
 - [ ] Interpreter: `value =>` / `error =>` arms in `when` are sugar for matching `Ok` / `Err` variants
-- [ ] Tests: declare error enum, catch and access fields, deferred binding (`const res = foo(); when (res) { ... }`), unconsumed binding errors, branch merge errors, reassignment error, composed error enums
+- [x] Tests: declare error enum, catch and access fields, try propagates error, catch with binding — deferred: `when` arms (`value =>`/`error =>`), unconsumed binding errors, branch merge errors, reassignment error, composed error enums
 
 ### Phase 5: Struct methods
 - [ ] AST: methods list in struct declaration (reuse `FnDeclaration`)

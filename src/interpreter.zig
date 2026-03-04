@@ -2,6 +2,7 @@ const std = @import("std");
 const ast = @import("ast.zig");
 const builtins = @import("builtins.zig");
 const token = @import("token.zig");
+const types = @import("types.zig");
 const utils = @import("utils.zig");
 
 const RuntimeContext = @import("runtime.zig").RuntimeContext;
@@ -263,17 +264,63 @@ pub const Interpreter = struct {
     }
 
     fn evaluateTry(self: *Interpreter, e: *Expression.Try) InterpreterError!Value {
-        // TODO: match on Ok/Err variants once result enum synthesis is in place
-        _ = self;
-        _ = e;
-        return error.NotImplemented;
+        const value = try self.evaluate(e.expression);
+        const si = switch (value) {
+            .struct_instance => |si| si,
+            else => return error.TypeError,
+        };
+
+        const type_name = si.type_name;
+
+        // It's the OK variant, we can unwrap the success value
+        // ++ is a compile-time string concat
+        if (std.mem.endsWith(u8, type_name, "." ++ types.RESULT_OK_VARIANT)) {
+            return si.field_values[0];
+        }
+
+        // It's the Err variant, store the full error variant and raise ErrorSignal
+        if (std.mem.endsWith(u8, type_name, "." ++ types.RESULT_ERR_VARIANT)) {
+            self.return_value = value;
+            return error.ErrorSignal;
+        }
+
+        return error.TypeError;
     }
 
     fn evaluateCatch(self: *Interpreter, e: *Expression.Catch) InterpreterError!Value {
-        // TODO: match on Ok/Err variants once result enum synthesis is in place
-        _ = self;
-        _ = e;
-        return error.NotImplemented;
+        // Execute left side and check if it's a struct_instance
+        const left = try self.evaluate(e.expression);
+
+        const si = switch (left) {
+            .struct_instance => |si| si,
+            else => return error.TypeError,
+        };
+
+        const type_name = si.type_name;
+
+        // It's the OK variant, we can unwrap the success value
+        // ++ is a compile-time string concat
+        if (std.mem.endsWith(u8, type_name, "." ++ types.RESULT_OK_VARIANT)) {
+            return si.field_values[0];
+        }
+
+        // It's the Err variant, execute the handle with a new environment if needed
+        if (std.mem.endsWith(u8, type_name, "." ++ types.RESULT_ERR_VARIANT)) {
+            const previous = self.env;
+            defer self.env = previous;
+
+            if (e.binding) |binding| {
+                const env = try self.allocator.create(Environment);
+                env.* = Environment.init(self.env, self.allocator);
+                // Bind the raw value of the Err variant
+                try env.define(binding.lexeme, si.field_values[0]);
+                self.env = env;
+            }
+
+            return try self.evaluate(e.handler);
+        }
+
+        return error.TypeError;
     }
 
     fn evaluateStructInit(_: *Interpreter, _: *Expression.StructInit) InterpreterError!Value {
@@ -343,17 +390,65 @@ pub const Interpreter = struct {
         }
 
         // Execute function's body
-        return self.evaluateBlock(function.declaration.body, env) catch |err| switch (err) {
-            error.ReturnSignal => {
-                const value = self.return_value orelse Value.unit;
+        const raw = self.evaluateBlock(function.declaration.body, env) catch |err| switch (err) {
+            error.ReturnSignal => blk: {
+                const v = self.return_value orelse Value.unit;
                 self.return_value = null;
-                return value;
+                break :blk v;
             },
             error.ErrorSignal => {
-                const value = Value.unit;
-                return value;
+                const err_val = self.return_value orelse Value.unit;
+                self.return_value = null;
+                return err_val; // Pass through Err instance, skip Ok wrapping
             },
             else => return err,
         };
+
+        // If the function is a result (E!T), we need to either
+        // wrap in Err or Ok
+        if (function.result_name) |name| {
+            // If we have name = "MathError!Int", extract "MathError"
+            const bang_idx = std.mem.indexOf(u8, name, "!") orelse name.len;
+            const err_prefix = name[0..bang_idx];
+
+            // raw return value of the fn is a struct that starts with our E prefix
+            if (raw == .struct_instance and std.mem.startsWith(u8, raw.struct_instance.type_name, err_prefix)) {
+                const type_name = try utils.qualifiedName(self.allocator, name, types.RESULT_ERR_VARIANT);
+                const values = try self.allocator.alloc(Value, 1);
+                values[0] = raw;
+
+                const field_names = try self.allocator.alloc([]const u8, 1);
+                field_names[0] = "err";
+
+                const instance = try self.allocator.create(Value.StructInstance);
+                instance.* = .{
+                    .type_name = type_name,
+                    .field_names = field_names,
+                    .field_values = values,
+                    .kind = .case,
+                };
+                return Value{ .struct_instance = instance };
+            }
+            //
+            // If an Ok, wrap it and return the instance
+            const type_name = try utils.qualifiedName(self.allocator, name, types.RESULT_OK_VARIANT);
+            const values = try self.allocator.alloc(Value, 1);
+            values[0] = raw;
+
+            const field_names = try self.allocator.alloc([]const u8, 1);
+            field_names[0] = "value";
+
+            const instance = try self.allocator.create(Value.StructInstance);
+            instance.* = .{
+                .type_name = type_name,
+                .field_names = field_names,
+                .field_values = values,
+                .kind = .case,
+            };
+
+            return Value{ .struct_instance = instance };
+        }
+
+        return raw;
     }
 };
