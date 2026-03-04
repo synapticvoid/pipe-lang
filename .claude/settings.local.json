@@ -6,7 +6,8 @@
       "Bash(make build:*)",
       "mcp__github__issue_read",
       "Bash(git:*)",
-      "WebSearch"
+      "WebSearch",
+      "mcp__github__list_issues"
     ]
   }
 }
