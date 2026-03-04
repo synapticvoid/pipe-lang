@@ -59,7 +59,7 @@ pub const PipeType = union(enum) {
     }
 };
 
-pub const TypeInfo = union(enum) {
+pub const TypeDef = union(enum) {
     struct_type: StructTypeInfo,
     enum_type: EnumTypeInfo,
 };
@@ -70,11 +70,11 @@ pub const StructTypeInfo = struct {
 };
 
 pub const EnumTypeInfo = struct {
-    // true for a user-declared user enum, a type that can appear i E!T position
+    // true for a user-declared error enum, a type that can appear in E!T position
     is_error: bool,
 
     // internal only - marks the synthesized Ok/Err enum.
-    // It's an internal wrapper the type checker creates fro E!T
+    // It's an internal wrapper the type checker creates for E!T
     is_result: bool,
     variants: []const VariantTypeInfo,
 };

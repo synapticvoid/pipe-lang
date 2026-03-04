@@ -30,7 +30,8 @@ pub const InterpreterError = error{
 
 pub const Interpreter = struct {
     env: *Environment,
-    // Lookup registry to match enum name (used for type coercion)
+    // Set of declared enum type names; used to detect when a zero-field variant references
+    // an existing enum (nested enum coercion at runtime)
     known_enum_names: std.StringHashMap(void),
     ctx: RuntimeContext,
     return_value: ?Value = null,
@@ -92,7 +93,7 @@ pub const Interpreter = struct {
                 };
 
                 if (ok_name) |name| {
-                    break :blk try utils.resultQualifiedName(self.allocator, eu.error_set.lexeme, name);
+                    break :blk try utils.resultTypeName(self.allocator, eu.error_set.lexeme, name);
                 }
                 break :blk null;
             },
@@ -144,7 +145,7 @@ pub const Interpreter = struct {
                 break :blk names;
             };
 
-            const constructor_name = try utils.qualifiedName(self.allocator, decl.name.lexeme, variant.name.lexeme);
+            const constructor_name = try utils.memberName(self.allocator, decl.name.lexeme, variant.name.lexeme);
             try self.env.define(constructor_name, .{ .function = .{ .struct_constructor = .{
                 .name = constructor_name,
                 .field_names = field_names,
@@ -332,7 +333,7 @@ pub const Interpreter = struct {
     fn evaluateFieldAccess(self: *Interpreter, e: *Expression.FieldAccess) InterpreterError!Value {
         // Check for qualified union variant constructor: Role.Member
         if (e.object == .variable) {
-            const qualified = try utils.qualifiedName(self.allocator, e.object.variable.token.lexeme, e.name.lexeme);
+            const qualified = try utils.memberName(self.allocator, e.object.variable.token.lexeme, e.name.lexeme);
             if (self.env.get(qualified)) |val| {
                 return val;
             } else |_| {}
@@ -413,7 +414,7 @@ pub const Interpreter = struct {
 
             // raw return value of the fn is a struct that starts with our E prefix
             if (raw == .struct_instance and std.mem.startsWith(u8, raw.struct_instance.type_name, err_prefix)) {
-                const type_name = try utils.qualifiedName(self.allocator, name, types.RESULT_ERR_VARIANT);
+                const type_name = try utils.memberName(self.allocator, name, types.RESULT_ERR_VARIANT);
                 const values = try self.allocator.alloc(Value, 1);
                 values[0] = raw;
 
@@ -431,7 +432,7 @@ pub const Interpreter = struct {
             }
             //
             // If an Ok, wrap it and return the instance
-            const type_name = try utils.qualifiedName(self.allocator, name, types.RESULT_OK_VARIANT);
+            const type_name = try utils.memberName(self.allocator, name, types.RESULT_OK_VARIANT);
             const values = try self.allocator.alloc(Value, 1);
             values[0] = raw;
 

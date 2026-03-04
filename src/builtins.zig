@@ -4,7 +4,6 @@ const Environment = @import("environment.zig").Environment;
 const PipeType = @import("types.zig").PipeType;
 const RuntimeContext = @import("runtime.zig").RuntimeContext;
 const TypeEnvironment = @import("type_checker.zig").TypeEnvironment;
-const TypeInfo = @import("type_checker.zig").TypeInfo;
 const Value = @import("ast.zig").Value;
 
 pub fn registerAll(env: *Environment) !void {

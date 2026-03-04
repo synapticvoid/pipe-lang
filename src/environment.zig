@@ -20,6 +20,7 @@ pub const Environment = struct {
         self.values.deinit();
     }
 
+    // Creates a new binding in the current scope; errors if the name is already defined here.
     pub fn define(self: *Environment, name: []const u8, value: Value) !void {
         const gop = try self.values.getOrPut(name);
         if (gop.found_existing) {
@@ -40,6 +41,7 @@ pub const Environment = struct {
         return error.UndefinedVariable;
     }
 
+    // Mutates an existing binding anywhere in the scope chain; errors if not found anywhere.
     pub fn assign(self: *Environment, name: []const u8, value: Value) !void {
         if (self.values.contains(name)) {
             try self.values.put(name, value);

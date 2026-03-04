@@ -7,7 +7,7 @@ const utils = @import("utils.zig");
 const PipeType = types.PipeType;
 const Token = @import("token.zig").Token;
 
-pub const TypeInfo = union(enum) {
+pub const SymbolInfo = union(enum) {
     variable: VarSignature,
     function: FnSignature,
 };
@@ -34,22 +34,22 @@ const TypeCheckError = error{
 
 pub const TypeEnvironment = struct {
     enclosing: ?*TypeEnvironment,
-    symbols: std.StringHashMap(TypeInfo),
+    symbols: std.StringHashMap(SymbolInfo),
     allocator: std.mem.Allocator,
 
     pub fn init(enclosing: ?*TypeEnvironment, allocator: std.mem.Allocator) TypeEnvironment {
         return .{
             .enclosing = enclosing,
-            .symbols = std.StringHashMap(TypeInfo).init(allocator),
+            .symbols = std.StringHashMap(SymbolInfo).init(allocator),
             .allocator = allocator,
         };
     }
 
-    pub fn define(self: *TypeEnvironment, name: []const u8, info: TypeInfo) !void {
+    pub fn define(self: *TypeEnvironment, name: []const u8, info: SymbolInfo) !void {
         try self.symbols.put(name, info);
     }
 
-    pub fn get(self: *TypeEnvironment, name: []const u8) !TypeInfo {
+    pub fn get(self: *TypeEnvironment, name: []const u8) !SymbolInfo {
         if (self.symbols.get(name)) |info| {
             return info;
         } else if (self.enclosing) |enclosing| {
@@ -73,9 +73,9 @@ pub const TypeChecker = struct {
     // name -> error variant identifier
     error_sets: std.StringHashMap([]const []const u8),
 
-    // Looko up table to match struct types
+    // Lookup table to match struct types
     // name -> struct/union type
-    type_registry: std.StringHashMap(types.TypeInfo),
+    type_registry: std.StringHashMap(types.TypeDef),
 
     // Last type checker error message
     last_error: ?[]const u8 = null,
@@ -92,7 +92,7 @@ pub const TypeChecker = struct {
         return .{
             .env = env,
             .error_sets = std.StringHashMap([]const []const u8).init(allocator),
-            .type_registry = std.StringHashMap(types.TypeInfo).init(allocator),
+            .type_registry = std.StringHashMap(types.TypeDef).init(allocator),
             .allocator = allocator,
         };
     }
@@ -107,7 +107,7 @@ pub const TypeChecker = struct {
         var last_type: PipeType = .unit;
         for (statements) |statement| {
             switch (statement) {
-                .expression => |expr| last_type = try expectType(try self.checkExpression(expr)),
+                .expression => |expr| last_type = try asPipeType(try self.checkExpression(expr)),
                 .var_declaration => |decl| {
                     try self.checkVarDeclarationStatement(decl);
                     last_type = .unit;
@@ -130,7 +130,7 @@ pub const TypeChecker = struct {
         var resolved_type: PipeType = undefined;
 
         if (decl.initializer) |init_expr| {
-            const inferred = try expectType(try self.checkExpression(init_expr));
+            const inferred = try asPipeType(try self.checkExpression(init_expr));
 
             if (decl.type_annotation) |annotation| {
                 const annotated = try self.resolveTypeAnnotation(annotation);
@@ -208,7 +208,7 @@ pub const TypeChecker = struct {
 
     fn checkReturnStatement(self: *TypeChecker, ret: ast.Statement.Return) TypeCheckError!PipeType {
         const return_type: PipeType = if (ret.value) |value|
-            try expectType(try self.checkExpression(value))
+            try asPipeType(try self.checkExpression(value))
         else
             .unit;
 
@@ -262,7 +262,7 @@ pub const TypeChecker = struct {
                 }
             } orelse try self.resolveFields(variant.fields);
 
-            const variant_name = try utils.qualifiedName(self.allocator, decl.name.lexeme, variant.name.lexeme);
+            const variant_name = try utils.memberName(self.allocator, decl.name.lexeme, variant.name.lexeme);
             try self.registerConstructor(variant_name, fields, .{ .enum_type = decl.name.lexeme });
 
             resolved_variants[i] = .{
@@ -280,7 +280,7 @@ pub const TypeChecker = struct {
 
     // NOTE: -- Expressions
 
-    fn checkExpression(self: *TypeChecker, expr: ast.Expression) TypeCheckError!TypeInfo {
+    fn checkExpression(self: *TypeChecker, expr: ast.Expression) TypeCheckError!SymbolInfo {
         return switch (expr) {
             .literal => |lit| self.checkLiteral(lit),
             .variable => |v| self.checkVariable(v),
@@ -300,7 +300,7 @@ pub const TypeChecker = struct {
         };
     }
 
-    fn checkLiteral(_: *TypeChecker, literal: ast.Expression.Literal) !TypeInfo {
+    fn checkLiteral(_: *TypeChecker, literal: ast.Expression.Literal) !SymbolInfo {
         const pipe_type: PipeType = switch (literal.value) {
             .boolean => .bool,
             .int => .int,
@@ -311,12 +311,12 @@ pub const TypeChecker = struct {
         return .{ .variable = .{ .pipe_type = pipe_type, .mutability = .constant } };
     }
 
-    fn checkVariable(self: *TypeChecker, v: ast.Expression.Variable) !TypeInfo {
+    fn checkVariable(self: *TypeChecker, v: ast.Expression.Variable) !SymbolInfo {
         return self.env.get(v.token.lexeme);
     }
 
-    fn checkUnary(self: *TypeChecker, unary: *ast.Expression.Unary) !TypeInfo {
-        const right_type = try expectType(try self.checkExpression(unary.right));
+    fn checkUnary(self: *TypeChecker, unary: *ast.Expression.Unary) !SymbolInfo {
+        const right_type = try asPipeType(try self.checkExpression(unary.right));
         const op = unary.operator.lexeme;
         const line = unary.operator.line;
 
@@ -337,9 +337,9 @@ pub const TypeChecker = struct {
         };
     }
 
-    fn checkBinary(self: *TypeChecker, binary: *ast.Expression.Binary) !TypeInfo {
-        const left_type = try expectType(try self.checkExpression(binary.left));
-        const right_type = try expectType(try self.checkExpression(binary.right));
+    fn checkBinary(self: *TypeChecker, binary: *ast.Expression.Binary) !SymbolInfo {
+        const left_type = try asPipeType(try self.checkExpression(binary.left));
+        const right_type = try asPipeType(try self.checkExpression(binary.right));
         const left_name = @tagName(left_type);
         const right_name = @tagName(right_type);
         const line = binary.operator.line;
@@ -371,15 +371,15 @@ pub const TypeChecker = struct {
         };
     }
 
-    fn checkIf(self: *TypeChecker, if_expr: *ast.Expression.If) !TypeInfo {
-        const condition_type = try expectType(try self.checkExpression(if_expr.condition));
+    fn checkIf(self: *TypeChecker, if_expr: *ast.Expression.If) !SymbolInfo {
+        const condition_type = try asPipeType(try self.checkExpression(if_expr.condition));
         if (condition_type != .bool) {
             return self.fail(error.TypeMismatch, "Type mismatch: if condition must be Bool, got {s}", .{@tagName(condition_type)});
         }
 
-        const then_type = try expectType(try self.checkExpression(if_expr.then_branch));
+        const then_type = try asPipeType(try self.checkExpression(if_expr.then_branch));
         if (if_expr.else_branch) |else_branch| {
-            const else_type = try expectType(try self.checkExpression(else_branch));
+            const else_type = try asPipeType(try self.checkExpression(else_branch));
             if (!then_type.compatible(else_type)) {
                 return self.fail(error.TypeMismatch, "Type mismatch: if branches must have same type, got {s} and {s}", .{ @tagName(then_type), @tagName(else_type) });
             }
@@ -389,7 +389,7 @@ pub const TypeChecker = struct {
         return .{ .variable = .{ .pipe_type = .unit, .mutability = .constant } };
     }
 
-    fn checkVarAssignment(self: *TypeChecker, assign: *ast.Expression.VarAssignment) !TypeInfo {
+    fn checkVarAssignment(self: *TypeChecker, assign: *ast.Expression.VarAssignment) !SymbolInfo {
         const info = try self.env.get(assign.token.lexeme);
         const v = switch (info) {
             .variable => |v_sig| v_sig,
@@ -400,7 +400,7 @@ pub const TypeChecker = struct {
             return self.fail(error.ConstReassignment, "Cannot reassign constant '{s}' at line {d}", .{ assign.token.lexeme, assign.token.line });
         }
 
-        const value_type = try expectType(try self.checkExpression(assign.value));
+        const value_type = try asPipeType(try self.checkExpression(assign.value));
         if (!v.pipe_type.compatible(value_type)) {
             return self.fail(error.TypeMismatch, "Type mismatch: expected {s}, got {s} at line {d}", .{
                 @tagName(v.pipe_type),
@@ -412,7 +412,7 @@ pub const TypeChecker = struct {
         return .{ .variable = .{ .pipe_type = v.pipe_type, .mutability = v.mutability } };
     }
 
-    fn checkFnCall(self: *TypeChecker, call: *ast.Expression.FnCall) !TypeInfo {
+    fn checkFnCall(self: *TypeChecker, call: *ast.Expression.FnCall) !SymbolInfo {
         const callee_info = try self.checkExpression(call.callee);
         const sig = switch (callee_info) {
             .function => |s| s,
@@ -424,7 +424,7 @@ pub const TypeChecker = struct {
         }
 
         for (call.args, sig.param_types, 0..) |arg, param_type, i| {
-            const arg_type = try expectType(try self.checkExpression(arg));
+            const arg_type = try asPipeType(try self.checkExpression(arg));
             if (!arg_type.compatible(param_type)) {
                 return self.fail(error.TypeMismatch, "Type mismatch: argument {d} expected {s}, got {s}", .{ i + 1, @tagName(param_type), @tagName(arg_type) });
             }
@@ -433,7 +433,7 @@ pub const TypeChecker = struct {
         return .{ .variable = .{ .pipe_type = sig.return_type, .mutability = .constant } };
     }
 
-    fn checkInit(self: *TypeChecker, init_expr: *ast.Expression.StructInit) TypeCheckError!TypeInfo {
+    fn checkInit(self: *TypeChecker, init_expr: *ast.Expression.StructInit) TypeCheckError!SymbolInfo {
         const info = self.type_registry.get(init_expr.name.lexeme) orelse return error.UndefinedType;
 
         const struct_type = switch (info) {
@@ -447,7 +447,7 @@ pub const TypeChecker = struct {
 
         // Compare args and field types
         for (init_expr.args, struct_type.fields, 0..) |arg, field, i| {
-            const arg_type = try expectType(try self.checkExpression(arg));
+            const arg_type = try asPipeType(try self.checkExpression(arg));
             if (!arg_type.compatible(field.pipe_type)) {
                 return self.fail(error.TypeMismatch, "Type mismatch: argument {d} expected {s}, got {s}", .{ i + 1, @tagName(field.pipe_type), @tagName(arg_type) });
             }
@@ -456,18 +456,18 @@ pub const TypeChecker = struct {
         return .{ .variable = .{ .pipe_type = .{ .struct_type = init_expr.name.lexeme }, .mutability = .constant } };
     }
 
-    fn checkFieldAccess(self: *TypeChecker, field_access: *ast.Expression.FieldAccess) TypeCheckError!TypeInfo {
-        // We have to check for a constructor call early one
+    fn checkFieldAccess(self: *TypeChecker, field_access: *ast.Expression.FieldAccess) TypeCheckError!SymbolInfo {
+        // We have to check for a constructor call early on
         // Constructors are registered as function calls in the environment
         if (field_access.object == .variable) {
-            const qualified = try utils.qualifiedName(self.allocator, field_access.object.variable.token.lexeme, field_access.name.lexeme);
+            const qualified = try utils.memberName(self.allocator, field_access.object.variable.token.lexeme, field_access.name.lexeme);
 
             if (self.env.get(qualified)) |val| {
                 return val;
             } else |_| {}
         }
 
-        const obj_type = try expectType(try self.checkExpression(field_access.object));
+        const obj_type = try asPipeType(try self.checkExpression(field_access.object));
 
         const struct_name = switch (obj_type) {
             .struct_type => |name| name,
@@ -488,7 +488,7 @@ pub const TypeChecker = struct {
                 return self.fail(error.UndefinedField, "Undefined field '{s}'", .{field_access.name.lexeme});
             },
             .enum_type => |u| {
-                // Look for variant field names (nested for)
+                // Search all variants' fields for the accessed field name
                 for (u.variants) |variant| {
                     for (variant.fields) |field| {
                         if (std.mem.eql(u8, field.name, field_access.name.lexeme)) {
@@ -502,8 +502,8 @@ pub const TypeChecker = struct {
         };
     }
 
-    fn checkTry(self: *TypeChecker, try_expr: *ast.Expression.Try) !TypeInfo {
-        const inner = try expectType(try self.checkExpression(try_expr.expression));
+    fn checkTry(self: *TypeChecker, try_expr: *ast.Expression.Try) !SymbolInfo {
+        const inner = try asPipeType(try self.checkExpression(try_expr.expression));
         //
         // Check that the expression is a result enum (synthesized E!T type)
         if (!self.isFallible(inner)) {
@@ -514,14 +514,14 @@ pub const TypeChecker = struct {
             return self.fail(error.TypeMismatch, "Type mismatch: 'try' used outside a fallible function at line {d}", .{try_expr.token.line});
         }
 
-        // Unwrap the OK variant or propagate the erro upwards
+        // Unwrap the OK variant or propagate the error upwards
         const ok_type = self.getResultVariantType(inner, types.RESULT_OK_VARIANT) orelse return error.TypeMismatch;
 
         return .{ .variable = .{ .pipe_type = ok_type, .mutability = .constant } };
     }
 
-    fn checkCatch(self: *TypeChecker, catch_expr: *ast.Expression.Catch) !TypeInfo {
-        const left = try expectType(try self.checkExpression(catch_expr.expression));
+    fn checkCatch(self: *TypeChecker, catch_expr: *ast.Expression.Catch) !SymbolInfo {
+        const left = try asPipeType(try self.checkExpression(catch_expr.expression));
         //
         // Check that the expression is a result enum (synthesized E!T type)
         if (!self.isFallible(left)) {
@@ -562,7 +562,7 @@ pub const TypeChecker = struct {
     }
 
     // Unwrap a variable's type, or error if it's a function signature.
-    fn expectType(info: TypeInfo) !PipeType {
+    fn asPipeType(info: SymbolInfo) !PipeType {
         return switch (info) {
             .variable => |v| v.pipe_type,
             .function => error.TypeMismatch,
@@ -603,6 +603,10 @@ pub const TypeChecker = struct {
                 return error.NotImplemented;
             },
             .explicit_error_union => |eu| {
+                // NOTE: this branch has a side-effect — it synthesizes a new EnumTypeInfo
+                // for the E!T result type and registers it in type_registry under the
+                // generated name (e.g. "MyError!Int") so later lookups resolve correctly.
+
                 // Guard clauses
                 const error_info = self.type_registry.get(eu.error_set.lexeme) orelse return error.UndefinedType;
                 if (error_info != .enum_type) {
@@ -620,7 +624,7 @@ pub const TypeChecker = struct {
                 ok_type.* = try self.resolveTypeAnnotation(eu.ok_type.*);
 
                 // 2. Generate the E!T name
-                const name = try utils.resultQualifiedName(
+                const name = try utils.resultTypeName(
                     self.allocator,
                     eu.error_set.lexeme,
                     pipeTypeName(ok_type.*),

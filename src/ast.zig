@@ -181,7 +181,7 @@ pub const Value = union(enum) {
     null,
     unit,
 
-    // pointer because we want to be able to this
+    // pointer so that copies of a value share identity (u2 = u1 means u1.field == u2.field)
     // var u1 = User("Bob");
     // var u2 = u1;
     // if (u1.name == u2.name) { ... } // true
@@ -292,15 +292,10 @@ pub const StructKind = enum {
 };
 
 pub const PipeTypeAnnotation = union(enum) {
-    // int, string, MyType
-    named: Token,
-
-    // !T
-    inferred_error_union: *PipeTypeAnnotation,
-
-    explicit_error_union: struct {
-        // E in E!T
-        error_set: Token,
+    named: Token,                   // e.g. `Int`, `MyEnum`
+    inferred_error_union: *PipeTypeAnnotation, // e.g. `!Int` — error set inferred (not yet implemented)
+    explicit_error_union: struct {  // e.g. `MyError!Int`
+        error_set: Token,           // the E in E!T
         ok_type: *PipeTypeAnnotation,
     },
 };
