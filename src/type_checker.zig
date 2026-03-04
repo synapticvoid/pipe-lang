@@ -70,6 +70,9 @@ pub const TypeChecker = struct {
     // True if we're in a fallible function
     in_fallible_fn: bool = false,
 
+    // Current strut type - used to resolve Self in methods
+    current_struct_type: ?[]const u8 = null,
+
     // Lookup table to match error uses to error declarations
     // name -> error variant identifier
     error_sets: std.StringHashMap([]const []const u8),
@@ -283,6 +286,39 @@ pub const TypeChecker = struct {
 
         // Register constructor as a function
         try self.registerConstructor(decl.name.lexeme, resolved_fields, .{ .struct_type = decl.name.lexeme });
+
+        // Register methods
+
+        // 1. Set current struct name to have "Self" be resolved
+        const previous = self.current_struct_type;
+        self.current_struct_type = decl.name.lexeme;
+        defer self.current_struct_type = previous;
+
+        // 2. Register each method as Type.method
+        for (decl.methods) |method| {
+            // This checks and register the method to the TypeEnvironment as "method"
+            // What we want is to register it as "Type.method"
+            try self.checkFnDeclarationStatement(method);
+
+            // Register the method as "Type.method" and remove "method"
+            const qualified = try utils.memberName(self.allocator, decl.name.lexeme, method.name.lexeme);
+            const sig = switch (try self.env.get(method.name.lexeme)) {
+                .function => |s| s,
+                else => unreachable,
+            };
+
+            // Instance method: first param is Self - strip if from the registered signature
+            const registered_params = if (sig.param_types.len > 0 and sig.param_types[0].compatible(.{ .struct_type = decl.name.lexeme }))
+                sig.param_types[1..]
+            else
+                sig.param_types;
+
+            try self.env.define(qualified, .{ .function = .{
+                .param_types = registered_params,
+                .return_type = sig.return_type,
+            } });
+            _ = self.env.symbols.remove(method.name.lexeme);
+        }
     }
 
     fn checkEnumDeclarationStatement(self: *TypeChecker, decl: ast.Statement.EnumDeclaration) !void {
@@ -613,6 +649,12 @@ pub const TypeChecker = struct {
                     }
                 }
 
+                // No field found - check for a method
+                const qualified = try utils.memberName(self.allocator, struct_name, field_access.name.lexeme);
+                if (self.env.get(qualified)) |method| {
+                    return method;
+                } else |_| {}
+
                 return self.fail(error.UndefinedField, "Undefined field '{s}'", .{field_access.name.lexeme});
             },
             .enum_type => |u| {
@@ -711,6 +753,11 @@ pub const TypeChecker = struct {
     fn resolveTypeName(self: *TypeChecker, name: []const u8) !PipeType {
         if (type_names.get(name)) |pipe_type| {
             return pipe_type;
+        }
+
+        // When the type is "Self", use the current struct type name
+        if (std.mem.eql(u8, name, types.SELF_TYPE) and self.current_struct_type != null) {
+            return .{ .struct_type = self.current_struct_type.? };
         }
 
         if (self.type_registry.get(name)) |info| {

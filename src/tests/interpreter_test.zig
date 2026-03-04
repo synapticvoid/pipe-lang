@@ -231,6 +231,33 @@ test "struct print" {
     });
 }
 
+// -- Struct methods
+
+test "struct instance method call" {
+    try expectEval(.{
+        .{
+            \\case struct User(const id: Int) {
+            \\    fn id_plus(self: Self, n: Int) Int { self.id + n; }
+            \\}
+            \\const u = User(1);
+            \\u.id_plus(10);
+        , "11" },
+    });
+}
+
+test "struct static method call" {
+    try expectEval(.{
+        .{
+            \\case struct User(const id: Int) {
+            \\    fn default() Self { User(0); }
+            \\}
+            \\User.default().id;
+        , "0" },
+    });
+}
+
+// -- Enums
+
 test "enum no-payload variant construction" {
     try expectEval(.{
         .{ "enum Role { Admin, Member, Guest, } Role.Admin();", "Role.Admin()" },

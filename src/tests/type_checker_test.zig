@@ -191,6 +191,27 @@ test "struct used as field type" {
     );
 }
 
+// -- Struct methods
+
+test "struct instance method call" {
+    try expectTypeCheck(
+        \\case struct User(const id: Int) {
+        \\    fn id_plus(self: Self, n: Int) Int { self.id + n; }
+        \\}
+        \\const u = User(1);
+        \\const x: Int = u.id_plus(10);
+    );
+}
+
+test "struct static method call" {
+    try expectTypeCheck(
+        \\case struct User(const id: Int) {
+        \\    fn default() Self { User(0); }
+        \\}
+        \\const u: User = User.default();
+    );
+}
+
 // -- Enums
 
 test "enum declaration is valid" {

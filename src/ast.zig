@@ -47,6 +47,7 @@ pub const Statement = union(enum) {
         name: Token,
         fields: []const FieldDeclaration,
         kind: StructKind,
+        methods: []const FnDeclaration,
     };
 
     pub const EnumDeclaration = struct {

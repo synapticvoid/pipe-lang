@@ -35,6 +35,7 @@ pub const Interpreter = struct {
     known_enum_names: std.StringHashMap(void),
     ctx: RuntimeContext,
     return_value: ?Value = null,
+    method_receiver: ?Value = null,
     allocator: std.mem.Allocator,
 
     pub fn init(ctx: RuntimeContext, allocator: std.mem.Allocator) !Interpreter {
@@ -119,11 +120,23 @@ pub const Interpreter = struct {
             field_names[i] = field.name.lexeme;
         }
 
+        // Define the struct constructor as a function "Type"
         try self.env.define(decl.name.lexeme, .{ .function = .{ .struct_constructor = .{
             .name = decl.name.lexeme,
             .field_names = field_names,
             .kind = decl.kind,
         } } });
+
+        // Register the methods as "Type.method"
+        for (decl.methods) |method| {
+            const qualified = try utils.memberName(self.allocator, decl.name.lexeme, method.name.lexeme);
+            const user_fn = Callable.UserFn{
+                .closure = self.env,
+                .declaration = method,
+                .result_name = null,
+            };
+            try self.env.define(qualified, .{ .function = .{ .user = user_fn } });
+        }
     }
 
     fn executeEnumDeclaration(self: *Interpreter, decl: ast.Statement.EnumDeclaration) !void {
@@ -353,6 +366,14 @@ pub const Interpreter = struct {
             }
         }
 
+        // Check for instance method
+        const qualified = try utils.memberName(self.allocator, inst.type_name, e.name.lexeme);
+        if (self.env.get(qualified)) |method| {
+            // Store the instance so evaluateFnCall can injedct it as self
+            self.method_receiver = obj;
+            return method;
+        } else |_| {}
+
         return InterpreterError.UndefinedField;
     }
 
@@ -385,7 +406,20 @@ pub const Interpreter = struct {
         // Create environment with params
         const env = try self.allocator.create(Environment);
         env.* = Environment.init(function.closure, self.allocator);
-        for (args, function.declaration.params) |arg, param| {
+
+        // Methods have self as first param, skip it to properly match args
+        const params = if (self.method_receiver != null)
+            function.declaration.params[1..]
+        else
+            function.declaration.params;
+
+        // Bind method receiver as first param if present
+        if (self.method_receiver) |receiver| {
+            try env.define(function.declaration.params[0].name.lexeme, receiver);
+            self.method_receiver = null;
+        }
+
+        for (args, params) |arg, param| {
             const value = try self.evaluate(arg);
             try env.define(param.name.lexeme, value);
         }
@@ -430,7 +464,7 @@ pub const Interpreter = struct {
                 };
                 return Value{ .struct_instance = instance };
             }
-            //
+
             // If an Ok, wrap it and return the instance
             const type_name = try utils.memberName(self.allocator, name, types.RESULT_OK_VARIANT);
             const values = try self.allocator.alloc(Value, 1);

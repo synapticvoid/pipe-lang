@@ -73,14 +73,15 @@ Each phase is self-contained and testable.
 - [x] Tests: declare error enum, catch and access fields, try propagates error, catch with binding, unconsumed binding errors, branch merge errors, reassignment error
 
 ### Phase 5: Struct methods
-- [ ] AST: methods list in struct declaration (reuse `FnDeclaration`)
-- [ ] Parser: parse `fn` inside struct body
-- [ ] `Self` type resolves to enclosing struct
-- [ ] Instance methods: `self` as first param, called via `expr.method(args)`
+- [x] AST: methods list in struct declaration (reuse `FnDeclaration`)
+- [x] Parser: parse `fn` inside struct body (long form with `{ }`, short form unchanged)
+- [x] `Self` type resolves to enclosing struct
+- [x] Instance methods: first param typed as `Self`, called via `expr.method(args)` — `self` is not a keyword, any param name works
+- [x] Static methods: no `Self` param, called via `Type.method(args)`
+- [x] Tests: instance methods, static methods (type checker + interpreter)
 - [ ] `self: const Self` for read-only methods (cannot mutate `var` fields)
-- [ ] Static methods: no `self`, called via `Type.method(args)`
 - [ ] Override hooks: `fn toString(self: const Self) String`, `fn equals(self: const Self, other: const Self) Bool`
-- [ ] Tests: instance methods, static methods, const/mut self, toString/equals override
+- [ ] Tests: const/mut self, toString/equals override
 
 ### Phase 6: Mutability & long form
 - [ ] Per-field `const`/`var` enforcement (prevent assignment to `const` fields)

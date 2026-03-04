@@ -3,6 +3,7 @@ const activeTag = std.meta.activeTag;
 
 const ast = @import("ast.zig");
 
+pub const SELF_TYPE = "Self";
 pub const RESULT_OK_VARIANT = "Ok";
 pub const RESULT_ERR_VARIANT = "Err";
 

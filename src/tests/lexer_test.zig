@@ -49,19 +49,19 @@ test "tokenize comparison operators" {
 test "tokenize type system keywords" {
     const allocator = std.testing.allocator;
     var lexer = Lexer.init("struct enum case when self Self", allocator);
-    defer lexer.deinit();
+        defer lexer.deinit();
 
-    const tokens = try lexer.tokenize();
+        const tokens = try lexer.tokenize();
 
-    const expected = [_]Token{
-        .{ .type = .@"struct", .lexeme = "struct", .line = 1 },
-        .{ .type = .@"enum", .lexeme = "enum", .line = 1 },
-        .{ .type = .case, .lexeme = "case", .line = 1 },
-        .{ .type = .when, .lexeme = "when", .line = 1 },
-        .{ .type = .self, .lexeme = "self", .line = 1 },
-        .{ .type = .self_type, .lexeme = "Self", .line = 1 },
-        .{ .type = .eof, .lexeme = "", .line = 1 },
-    };
+        const expected = [_]Token{
+            .{ .type = .@"struct", .lexeme = "struct", .line = 1 },
+            .{ .type = .@"enum", .lexeme = "enum", .line = 1 },
+            .{ .type = .case, .lexeme = "case", .line = 1 },
+            .{ .type = .when, .lexeme = "when", .line = 1 },
+            .{ .type = .identifier, .lexeme = "self", .line = 1 },
+            .{ .type = .self_type, .lexeme = "Self", .line = 1 },
+            .{ .type = .eof, .lexeme = "", .line = 1 },
+        };
 
     try std.testing.expectEqualDeep(&expected, tokens);
 }

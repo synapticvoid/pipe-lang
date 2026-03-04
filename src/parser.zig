@@ -118,7 +118,7 @@ pub const Parser = struct {
         _ = try self.consume(.rparen, "Expect ')' after parameters.");
 
         var return_type: ?ast.PipeTypeAnnotation = null;
-        if (self.check(.identifier) or self.check(.bang)) {
+        if (self.check(.identifier) or self.check(.bang) or self.check(.self_type)) {
             return_type = try self.parseReturnType();
         }
 
@@ -158,9 +158,21 @@ pub const Parser = struct {
         const fields = try self.parseFieldList();
 
         _ = try self.consume(.rparen, "Expect ')' after struct fields.");
-        _ = try self.consume(.semicolon, "Expect ';' after struct declaration.");
 
-        return .{ .name = name, .kind = kind, .fields = fields };
+        // Long form: parse methods between { }
+        // Short form: expect ;
+        var methods: std.ArrayList(ast.Statement.FnDeclaration) = .{};
+        if (self.match(&.{.lbrace})) {
+            while (!self.check(.rbrace)) {
+                _ = try self.consume(.@"fn", "Expect 'fn' inside struct body.");
+                try methods.append(self.allocator, try self.parseFnDeclarationStatement());
+            }
+            _ = try self.consume(.rbrace, "Expect '}' after struct body.");
+        } else {
+            _ = try self.consume(.semicolon, "Expect ';' after struct declaration.");
+        }
+
+        return .{ .name = name, .kind = kind, .fields = fields, .methods = methods.items };
     }
 
     fn parseEnumDeclarationStatement(self: *Parser, is_error: bool) !ast.Statement.EnumDeclaration {
@@ -203,8 +215,11 @@ pub const Parser = struct {
             return .{ .inferred_error_union = ok_type };
         }
 
-        // Case 2 and 3: start with an identifier
-        const name = try self.consume(.identifier, "Expect type name.");
+        // Case 2 and 3: start with an identifier/Self
+        const name = if (self.match(&.{.self_type}))
+            self.previous()
+        else
+            try self.consume(.identifier, "Expect type name.");
 
         // Case 2: E!T - identifier was the error set, parse the ok type
         if (self.match(&.{.bang})) {
