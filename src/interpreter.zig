@@ -214,8 +214,8 @@ pub const Interpreter = struct {
 
         // Handle equality before (comparing struct, etc)
         switch (e.operator.type) {
-            .equal_equal => return Value{ .boolean = left.eql(right) },
-            .bang_equal => return Value{ .boolean = !left.eql(right) },
+            .equal_equal => return Value{ .boolean = try self.evaluateEquality(left, right) },
+            .bang_equal => return Value{ .boolean = !try self.evaluateEquality(left, right) },
             else => {},
         }
 
@@ -485,5 +485,26 @@ pub const Interpreter = struct {
         }
 
         return raw;
+    }
+
+    // NOTE: -- Helpers
+
+    fn evaluateEquality(self: *Interpreter, left: Value, right: Value) InterpreterError!bool {
+        if (left == .struct_instance and right == .struct_instance) {
+            const type_name = left.struct_instance.type_name;
+            const qualified = try utils.memberName(self.allocator, type_name, "equals");
+            if (self.env.get(qualified)) |method_val| {
+                const user_fn = method_val.function.user;
+
+                const env = try self.allocator.create(Environment);
+                env.* = Environment.init(user_fn.closure, self.allocator);
+
+                try env.define(user_fn.declaration.params[0].name.lexeme, left);
+                try env.define(user_fn.declaration.params[1].name.lexeme, right);
+
+                return (try self.evaluateBlock(user_fn.declaration.body, env)).isTruthy();
+            } else |_| {}
+        }
+        return left.eql(right);
     }
 };

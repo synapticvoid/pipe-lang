@@ -256,6 +256,31 @@ test "struct static method call" {
     });
 }
 
+test "struct equals override" {
+    try expectEval(.{
+        .{
+            \\case struct User(const id: Int, const name: String) {
+            \\    fn equals(self: Self, other: Self) Bool { self.id == other.id; }
+            \\}
+            \\const a = User(1, "Alice");
+            \\const b = User(1, "Bob");
+            \\a == b;
+        , "true" },
+        .{
+            \\case struct User(const id: Int, const name: String) {
+            \\    fn equals(self: Self, other: Self) Bool { self.id == other.id; }
+            \\}
+            \\User(1, "Alice") == User(2, "Alice");
+        , "false" },
+        .{
+            \\case struct User(const id: Int, const name: String) {
+            \\    fn equals(self: Self, other: Self) Bool { self.id == other.id; }
+            \\}
+            \\User(1, "Alice") != User(1, "Bob");
+        , "false" },
+    });
+}
+
 // -- Enums
 
 test "enum no-payload variant construction" {
