@@ -69,6 +69,7 @@ pub const TypeDef = union(enum) {
 
 pub const StructTypeInfo = struct {
     fields: []const FieldInfo,
+    body_fields: []const FieldInfo,
     kind: ast.StructKind,
 };
 

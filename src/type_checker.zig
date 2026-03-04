@@ -277,10 +277,26 @@ pub const TypeChecker = struct {
     fn checkStructDeclarationStatement(self: *TypeChecker, decl: ast.Statement.StructDeclaration) !void {
         // Check fields info
         const resolved_fields = try self.resolveFields(decl.fields);
+        const resolved_body_fields = try self.resolveFields(decl.body_fields);
+
+        // Check each body field default value type matches the declared type
+        for (decl.body_fields, resolved_body_fields) |decl_field, resolved_field| {
+            if (decl_field.default_value) |default| {
+                const val_type = try asPipeType(try self.checkExpression(default));
+                if (!val_type.compatible(resolved_field.pipe_type)) {
+                    return self.fail(error.TypeMismatch, "Type mismatch: expected type {s}, got {s} at line {d}", .{
+                        @tagName(resolved_field.pipe_type),
+                        @tagName(val_type),
+                        decl_field.name.line,
+                    });
+                }
+            }
+        }
 
         // Declare the struct in the registry
         try self.type_registry.put(decl.name.lexeme, .{ .struct_type = .{
             .fields = resolved_fields,
+            .body_fields = resolved_body_fields,
             .kind = decl.kind,
         } });
 
@@ -643,8 +659,15 @@ pub const TypeChecker = struct {
         const info = self.type_registry.get(struct_name) orelse return error.UndefinedType;
         return switch (info) {
             .struct_type => |s| {
-                // Look for field name in struct type
+                // Look for field name in struct type fields
                 for (s.fields) |field| {
+                    if (std.mem.eql(u8, field.name, field_access.name.lexeme)) {
+                        return .{ .variable = .{ .pipe_type = field.pipe_type, .mutability = field.mutability } };
+                    }
+                }
+
+                // Look for field name in struct type bodyu fields
+                for (s.body_fields) |field| {
                     if (std.mem.eql(u8, field.name, field_access.name.lexeme)) {
                         return .{ .variable = .{ .pipe_type = field.pipe_type, .mutability = field.mutability } };
                     }

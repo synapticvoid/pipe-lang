@@ -46,6 +46,7 @@ pub const Statement = union(enum) {
     pub const StructDeclaration = struct {
         name: Token,
         fields: []const FieldDeclaration,
+        body_fields: []const FieldDeclaration,
         kind: StructKind,
         methods: []const FnDeclaration,
     };
@@ -65,6 +66,8 @@ pub const Statement = union(enum) {
         name: Token,
         type_annotation: PipeTypeAnnotation,
         mutability: Mutability,
+        // null for constructor params, required for computed fields
+        default_value: ?Expression,
     };
 };
 
@@ -200,6 +203,8 @@ pub const Value = union(enum) {
     pub const StructInstance = struct {
         type_name: []const u8,
         field_names: []const []const u8,
+        body_field_values: []Value,
+        body_field_names: []const []const u8,
         field_values: []Value,
         kind: StructKind,
     };

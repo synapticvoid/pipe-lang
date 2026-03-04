@@ -25,6 +25,8 @@ pub const Callable = union(enum) {
     pub const StructConstructor = struct {
         name: []const u8,
         field_names: []const []const u8,
+        body_field_names: []const []const u8,
+        body_field_defaults: []const ast.Expression,
         kind: ast.StructKind,
     };
 };

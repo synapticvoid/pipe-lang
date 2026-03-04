@@ -231,7 +231,51 @@ test "struct field assignment" {
             \\var u = User(1, "Alice");
             \\u.name = "Bob";
             \\u.name;
-        , "\"Bob\"" },
+            ,
+            "\"Bob\"",
+        },
+    });
+}
+
+test "struct body field with default" {
+    try expectEval(.{
+        .{
+            \\case struct User(const id: Int) {
+            \\    const tag: String = "user";
+            \\}
+            \\const u = User(1);
+            \\u.tag;
+            ,
+            "\"user\"",
+        },
+    });
+}
+
+test "struct body field excluded from toString" {
+    try expectOutput(.{
+        .{
+            \\case struct User(const id: Int) {
+            \\    const tag: String = "user";
+            \\}
+            \\print(User(1));
+            ,
+            "User(id=1)\n",
+        },
+    });
+}
+
+test "struct body field excluded from equals" {
+    try expectEval(.{
+        .{
+            \\case struct User(const id: Int) {
+            \\    var tag: String = "a";
+            \\}
+            \\const a = User(1);
+            \\const b = User(1);
+            \\a == b;
+            ,
+            "true",
+        },
     });
 }
 
@@ -249,7 +293,9 @@ test "struct toString override" {
             \\    fn toString(self: Self) String { self.name; }
             \\}
             \\print(User(1, "Alice"));
-        , "Alice\n" },
+            ,
+            "Alice\n",
+        },
     });
 }
 
@@ -263,7 +309,9 @@ test "struct instance method call" {
             \\}
             \\const u = User(1);
             \\u.id_plus(10);
-        , "11" },
+            ,
+            "11",
+        },
     });
 }
 
@@ -274,7 +322,9 @@ test "struct static method call" {
             \\    fn default() Self { User(0); }
             \\}
             \\User.default().id;
-        , "0" },
+            ,
+            "0",
+        },
     });
 }
 
@@ -287,19 +337,25 @@ test "struct equals override" {
             \\const a = User(1, "Alice");
             \\const b = User(1, "Bob");
             \\a == b;
-        , "true" },
+            ,
+            "true",
+        },
         .{
             \\case struct User(const id: Int, const name: String) {
             \\    fn equals(self: Self, other: Self) Bool { self.id == other.id; }
             \\}
             \\User(1, "Alice") == User(2, "Alice");
-        , "false" },
+            ,
+            "false",
+        },
         .{
             \\case struct User(const id: Int, const name: String) {
             \\    fn equals(self: Self, other: Self) Bool { self.id == other.id; }
             \\}
             \\User(1, "Alice") != User(1, "Bob");
-        , "false" },
+            ,
+            "false",
+        },
     });
 }
 

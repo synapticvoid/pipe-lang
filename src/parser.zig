@@ -159,20 +159,41 @@ pub const Parser = struct {
 
         _ = try self.consume(.rparen, "Expect ')' after struct fields.");
 
+        var body_fields: std.ArrayList(ast.Statement.FieldDeclaration) = .{};
+
         // Long form: parse methods between { }
         // Short form: expect ;
         var methods: std.ArrayList(ast.Statement.FnDeclaration) = .{};
         if (self.match(&.{.lbrace})) {
             while (!self.check(.rbrace)) {
-                _ = try self.consume(.@"fn", "Expect 'fn' inside struct body.");
-                try methods.append(self.allocator, try self.parseFnDeclarationStatement());
+                // Parses body fields
+                if (self.check(.@"const") or self.check(.@"var")) {
+                    // parse = expr;
+                    var field = try self.parseFieldDeclaration();
+                    _ = try self.consume(.equal, "Expect '=' after body field type.");
+                    field.default_value = try self.parseExpression();
+                    _ = try self.consume(.semicolon, "Expect ';' after body field.");
+                    try body_fields.append(self.allocator, field);
+                } else if (self.match(&.{.@"fn"})) {
+                    // Parse functions
+                    // _ = try self.consume(.@"fn", "Expect 'fn' inside struct body.");
+                    try methods.append(self.allocator, try self.parseFnDeclarationStatement());
+                } else {
+                    return error.UnexpectedToken;
+                }
             }
             _ = try self.consume(.rbrace, "Expect '}' after struct body.");
         } else {
             _ = try self.consume(.semicolon, "Expect ';' after struct declaration.");
         }
 
-        return .{ .name = name, .kind = kind, .fields = fields, .methods = methods.items };
+        return .{
+            .name = name,
+            .kind = kind,
+            .fields = fields,
+            .body_fields = body_fields.items,
+            .methods = methods.items,
+        };
     }
 
     fn parseEnumDeclarationStatement(self: *Parser, is_error: bool) !ast.Statement.EnumDeclaration {
@@ -553,6 +574,7 @@ pub const Parser = struct {
             .name = name,
             .type_annotation = field_type,
             .mutability = mutability,
+            .default_value = null,
         };
     }
 

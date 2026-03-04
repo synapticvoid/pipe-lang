@@ -120,10 +120,19 @@ pub const Interpreter = struct {
             field_names[i] = field.name.lexeme;
         }
 
+        const body_field_names = try self.allocator.alloc([]const u8, decl.body_fields.len);
+        const body_field_defaults = try self.allocator.alloc(ast.Expression, decl.body_fields.len);
+        for (decl.body_fields, 0..) |field, i| {
+            body_field_names[i] = field.name.lexeme;
+            body_field_defaults[i] = field.default_value orelse unreachable;
+        }
+
         // Define the struct constructor as a function "Type"
         try self.env.define(decl.name.lexeme, .{ .function = .{ .struct_constructor = .{
             .name = decl.name.lexeme,
             .field_names = field_names,
+            .body_field_names = body_field_names,
+            .body_field_defaults = body_field_defaults,
             .kind = decl.kind,
         } } });
 
@@ -162,6 +171,8 @@ pub const Interpreter = struct {
             try self.env.define(constructor_name, .{ .function = .{ .struct_constructor = .{
                 .name = constructor_name,
                 .field_names = field_names,
+                .body_field_names = &.{},
+                .body_field_defaults = &.{},
                 .kind = .case,
             } } });
         }
@@ -277,15 +288,25 @@ pub const Interpreter = struct {
                     return builtin_fn.func(args.items, self.ctx);
                 },
                 .struct_constructor => |ctor| {
+                    // Evalute constructor fields
                     const values = try self.allocator.alloc(Value, e.args.len);
                     for (e.args, 0..) |arg, i| {
                         values[i] = try self.evaluate(arg);
                     }
+
+                    // Evaluate body fields
+                    const body_values = try self.allocator.alloc(Value, ctor.body_field_names.len);
+                    for (ctor.body_field_defaults, 0..) |default, i| {
+                        body_values[i] = try self.evaluate(default);
+                    }
+
                     const instance = try self.allocator.create(Value.StructInstance);
                     instance.* = .{
                         .type_name = ctor.name,
                         .field_names = ctor.field_names,
                         .field_values = values,
+                        .body_field_names = ctor.body_field_names,
+                        .body_field_values = body_values,
                         .kind = ctor.kind,
                     };
                     return Value{ .struct_instance = instance };
@@ -379,6 +400,13 @@ pub const Interpreter = struct {
 
         // Find the field and return its value
         for (inst.field_names, inst.field_values) |name, value| {
+            if (std.mem.eql(u8, name, e.name.lexeme)) {
+                return value;
+            }
+        }
+
+        // Find the body field and return its value
+        for (inst.body_field_names, inst.body_field_values) |name, value| {
             if (std.mem.eql(u8, name, e.name.lexeme)) {
                 return value;
             }
@@ -499,6 +527,8 @@ pub const Interpreter = struct {
                     .type_name = type_name,
                     .field_names = field_names,
                     .field_values = values,
+                    .body_field_names = &.{},
+                    .body_field_values = &.{},
                     .kind = .case,
                 };
                 return Value{ .struct_instance = instance };
@@ -517,6 +547,8 @@ pub const Interpreter = struct {
                 .type_name = type_name,
                 .field_names = field_names,
                 .field_values = values,
+                .body_field_names = &.{},
+                .body_field_values = &.{},
                 .kind = .case,
             };
 
