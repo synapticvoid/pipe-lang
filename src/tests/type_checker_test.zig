@@ -334,27 +334,43 @@ test "if branches must consume same !T bindings" {
         \\    const result = fallible();
         \\    if (true) { try result; } else { 0; }
         \\}
-        );
-        }
+    );
+}
 
-        test "if both branches consume !T is allowed" {
-        try expectTypeCheck(
-            \\error enum E { Fail }
-            \\fn fallible() E!Int { 1; }
-            \\fn main() E!Int {
-            \\    const result = fallible();
-            \\    if (true) { try result; } else { try result; }
-            \\}
-        );
-        }
+test "if both branches consume !T is allowed" {
+    try expectTypeCheck(
+        \\error enum E { Fail }
+        \\fn fallible() E!Int { 1; }
+        \\fn main() E!Int {
+        \\    const result = fallible();
+        \\    if (true) { try result; } else { try result; }
+        \\}
+    );
+}
 
-        test "if without else must not consume !T" {
-        try expectUnconsumedFallibleError(
-            \\error enum E { Fail }
-            \\fn fallible() E!Int { 1; }
-            \\fn main() E!Int {
-            \\    const result = fallible();
-            \\    if (true) { try result; }
-            \\}
+test "if without else must not consume !T" {
+    try expectUnconsumedFallibleError(
+        \\error enum E { Fail }
+        \\fn fallible() E!Int { 1; }
+        \\fn main() E!Int {
+        \\    const result = fallible();
+        \\    if (true) { try result; }
+        \\}
+    );
+}
+
+test "rebinding !T transfers obligation" {
+    try expectTypeCheck(
+        \\error enum E { Fail }
+        \\fn fallible() E!Int { 1; }
+        \\fn main() E!Int { const a = fallible(); const b = a; try b; }
+    );
+}
+
+test "rebinding !T without consuming new binding is rejected" {
+    try expectUnconsumedFallibleError(
+        \\error enum E { Fail }
+        \\fn fallible() E!Int { 1; }
+        \\fn main() { const a = fallible(); const b = a; }
     );
 }

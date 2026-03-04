@@ -292,10 +292,10 @@ pub const StructKind = enum {
 };
 
 pub const PipeTypeAnnotation = union(enum) {
-    named: Token,                   // e.g. `Int`, `MyEnum`
+    named: Token, // e.g. `Int`, `MyEnum`
     inferred_error_union: *PipeTypeAnnotation, // e.g. `!Int` — error set inferred (not yet implemented)
-    explicit_error_union: struct {  // e.g. `MyError!Int`
-        error_set: Token,           // the E in E!T
+    explicit_error_union: struct { // e.g. `MyError!Int`
+        error_set: Token, // the E in E!T
         ok_type: *PipeTypeAnnotation,
     },
 };

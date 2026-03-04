@@ -61,18 +61,16 @@ Each phase is self-contained and testable.
 - [x] Type checker: validate `!T` error side must be an `is_error` enum
 - [x] Type checker: `E!T` synthesizes a concrete `EnumTypeInfo` with two variants — `Ok` (fields: `[T]`) and `Err` (fields: `[E]`) — no new PipeType variant needed
 - [x] Type checker: `try` — caller must also return `!T`, propagates error type upward; `catch` — valid on fallible expression only; rejected on non-fallible
-- [ ] Type checker: `!T` is a first-class type — a `!T` value cannot be used where `T` is expected without unwrapping via `try`, `catch`, or `when`
-- [ ] Type checker: discarding a `!T` result with no binding (`foo();`) is a compile error; explicit discard (`const _ = foo()`) is allowed
-- [ ] Type checker: scope-level pending-set tracking — each scope maintains a set of unresolved `!T` bindings; all must be consumed before scope exit
-- [ ] Type checker: branch merge — each branch of `if`/`when` gets a copy of the pending set; both branches must consume the same bindings at the merge point
-- [ ] Type checker: early exit (`return`, `break`, `continue`) — all pending `!T` bindings must be consumed before the exit point
-- [ ] Type checker: reassignment — overwriting a `var` binding holding an unconsumed `!T` is a compile error
-- [ ] Type checker: loop body — pending `!T` bindings must be consumed before `break`, `continue`, or looping back
-- [ ] Type checker: consumption — `try`, `catch`, `when`, `return res`, passing as argument, and rebinding (`const other = res`) all consume a `!T` binding; rebinding transfers the obligation to the new name
+- [x] Type checker: `!T` is a first-class type — a `!T` value cannot be used where `T` is expected without unwrapping via `try`, `catch`, or `when`
+- [x] Type checker: discarding a `!T` result with no binding (`foo();`) is a compile error; explicit discard (`const _ = foo()`) is allowed
+- [x] Type checker: scope-level pending-set tracking — each scope maintains a set of unresolved `!T` bindings; all must be consumed before scope exit
+- [x] Type checker: branch merge — each branch of `if`/`when` gets a copy of the pending set; both branches must consume the same bindings at the merge point
+- [x] Type checker: early exit (`return`, `break`, `continue`) — all pending `!T` bindings must be consumed before the exit point
+- [x] Type checker: reassignment — overwriting a `var` binding holding an unconsumed `!T` is a compile error
+- [x] Type checker: consumption — `try`, `catch`, `when`, `return res`, passing as argument, and rebinding (`const other = res`) all consume a `!T` binding; rebinding transfers the obligation to the new name
 - [x] Interpreter: `!T` values are `Value.enum_instance` — `Ok` variant wraps the success value, `Err` variant wraps the error; no new Value variants needed; `result_name` computed in `executeFnDeclarationStatement`
 - [x] Interpreter: `try` — match on `Ok`/`Err` variant, unwrap or propagate; `catch` — match on `Ok`/`Err`, unwrap or bind and execute handler (stubbed as `NotImplemented`)
-- [ ] Interpreter: `value =>` / `error =>` arms in `when` are sugar for matching `Ok` / `Err` variants
-- [x] Tests: declare error enum, catch and access fields, try propagates error, catch with binding — deferred: `when` arms (`value =>`/`error =>`), unconsumed binding errors, branch merge errors, reassignment error, composed error enums
+- [x] Tests: declare error enum, catch and access fields, try propagates error, catch with binding, unconsumed binding errors, branch merge errors, reassignment error
 
 ### Phase 5: Struct methods
 - [ ] AST: methods list in struct declaration (reuse `FnDeclaration`)

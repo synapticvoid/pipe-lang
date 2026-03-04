@@ -166,10 +166,19 @@ pub const TypeChecker = struct {
             return self.fail(error.TypeMismatch, "Type mismatch: '{s}' has no type annotation or initializer at line {d}", .{ decl.name.lexeme, line });
         }
 
-        // If the resolved_type is !T, track it to check
-        // if it's consumed on scope exit
-        if (self.isFallible(resolved_type) and !std.mem.eql(u8, decl.name.lexeme, "_")) {
-            try self.pending_fallibles.put(decl.name.lexeme, {});
+        if (self.isFallible(resolved_type)) {
+            // Consume the source binding if it's a variable
+            if (decl.initializer) |init_expr| {
+                if (init_expr == .variable) {
+                    _ = self.pending_fallibles.remove(init_expr.variable.token.lexeme);
+                }
+            }
+            //
+            // If the resolved_type is !T, track it to check
+            // if it's consumed on scope exit
+            if (!std.mem.eql(u8, decl.name.lexeme, "_")) {
+                try self.pending_fallibles.put(decl.name.lexeme, {});
+            }
         }
 
         try self.env.define(decl.name.lexeme, .{ .variable = .{
@@ -361,6 +370,8 @@ pub const TypeChecker = struct {
         const op = unary.operator.lexeme;
         const line = unary.operator.line;
 
+        _ = try self.expectUnwrapped(right_type, line);
+
         return switch (unary.operator.type) {
             .bang => {
                 if (right_type != .bool) {
@@ -385,6 +396,10 @@ pub const TypeChecker = struct {
         const right_name = @tagName(right_type);
         const line = binary.operator.line;
         const op = binary.operator.lexeme;
+
+        // Guard clauses to ensure that fallible types are unwrapped
+        _ = try self.expectUnwrapped(left_type, line);
+        _ = try self.expectUnwrapped(right_type, line);
 
         const op_err = "Type mismatch: cannot apply '{s}' to {s} and {s} at line {d}";
 
@@ -521,8 +536,23 @@ pub const TypeChecker = struct {
             return self.fail(error.TypeMismatch, "Wrong number of arguments: expected {d}, got {d}", .{ sig.param_types.len, call.args.len });
         }
 
+        const line: usize = switch (call.callee) {
+            .variable => |v| v.token.line,
+            else => 0,
+        };
         for (call.args, sig.param_types, 0..) |arg, param_type, i| {
             const arg_type = try asPipeType(try self.checkExpression(arg));
+
+            // Fallible argument handling:
+            //   foo(result)  where foo(x: Int)   → reject (!T where T expected)
+            //   foo(result)  where foo(x: E!Int) → allow, consume "result" from pending
+            if (self.isFallible(arg_type) and !self.isFallible(param_type)) {
+                _ = try self.expectUnwrapped(arg_type, line);
+            } else if (self.isFallible(arg_type) and arg == .variable) {
+                // Consume the pending binding — obligation transfers to the callee
+                _ = self.pending_fallibles.remove(arg.variable.token.lexeme);
+            }
+
             if (!arg_type.compatible(param_type)) {
                 return self.fail(error.TypeMismatch, "Type mismatch: argument {d} expected {s}, got {s}", .{ i + 1, @tagName(param_type), @tagName(arg_type) });
             }
@@ -867,6 +897,13 @@ pub const TypeChecker = struct {
         }
 
         return null;
+    }
+
+    fn expectUnwrapped(self: *TypeChecker, t: PipeType, line: usize) !PipeType {
+        if (self.isFallible(t)) {
+            return self.fail(error.TypeMismatch, "!T value must be unwrapped with try, catch, or when at line {d}", .{line});
+        }
+        return t;
     }
 
     // Returns the name of a PipeType

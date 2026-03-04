@@ -120,7 +120,9 @@ test "catch passes through ok value" {
             \\error enum E { Fail, }
             \\fn maybe(x: Int) E!Int { x; }
             \\maybe(42) catch |e| { 0; };
-        , "42" },
+            ,
+            "42",
+        },
     });
 }
 
@@ -131,7 +133,9 @@ test "try unwraps ok value" {
             \\fn maybe(x: Int) E!Int { x; }
             \\fn caller(x: Int) E!Int { try maybe(x); }
             \\caller(42);
-        , "E!Int.Ok(value=42)" },
+            ,
+            "E!Int.Ok(value=42)",
+        },
     });
 }
 
@@ -141,7 +145,9 @@ test "catch handles error" {
             \\error enum E { Fail, }
             \\fn fail() E!Int { E.Fail(); }
             \\fail() catch |e| { 0; };
-        , "0" },
+            ,
+            "0",
+        },
     });
 }
 
@@ -151,7 +157,9 @@ test "catch with binding exposes error" {
             \\error enum E { Fail(const code: Int), }
             \\fn fail() E!Int { E.Fail(99); }
             \\fail() catch |e| { e.code; };
-        , "99" },
+            ,
+            "99",
+        },
     });
 }
 
@@ -162,7 +170,9 @@ test "try propagates error out of function" {
             \\fn fail() E!Int { E.Fail(); }
             \\fn caller() E!Int { try fail(); }
             \\caller();
-        , "E!Int.Err(err=E.Fail())" },
+            ,
+            "E!Int.Err(err=E.Fail())",
+        },
     });
 }
 
