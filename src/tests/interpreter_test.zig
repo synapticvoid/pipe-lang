@@ -231,6 +231,17 @@ test "struct print" {
     });
 }
 
+test "struct toString override" {
+    try expectOutput(.{
+        .{
+            \\case struct User(const id: Int, const name: String) {
+            \\    fn toString(self: Self) String { self.name; }
+            \\}
+            \\print(User(1, "Alice"));
+        , "Alice\n" },
+    });
+}
+
 // -- Struct methods
 
 test "struct instance method call" {

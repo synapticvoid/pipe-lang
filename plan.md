@@ -80,8 +80,8 @@ Each phase is self-contained and testable.
 - [x] Static methods: no `Self` param, called via `Type.method(args)`
 - [x] Tests: instance methods, static methods (type checker + interpreter)
 - [x] `self: const Self` for read-only methods — deferred (no field assignment yet, no observable effect until Phase 6)
-- [ ] Override hooks: `fn toString(self: const Self) String`, `fn equals(self: const Self, other: const Self) Bool`
-- [ ] Tests: const/mut self, toString/equals override
+- [x] Override hooks: `fn toString(self: Self) String`, `fn equals(self: Self, other: Self) Bool`
+- [x] Tests: toString/equals override
 
 ### Phase 6: Mutability & long form
 - [ ] Per-field `const`/`var` enforcement (prevent assignment to `const` fields)

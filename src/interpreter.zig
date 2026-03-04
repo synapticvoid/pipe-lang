@@ -253,9 +253,26 @@ pub const Interpreter = struct {
                 .user => |user_fn| return try self.callUserFn(user_fn, e.args),
                 .builtin => |builtin_fn| {
                     var args: std.ArrayList(Value) = .{};
+                    // Evalute arguments
                     for (e.args) |arg| {
                         try args.append(self.allocator, try self.evaluate(arg));
                     }
+
+                    for (args.items, 0..) |arg, i| {
+                        if (arg == .struct_instance) {
+                            const qualified = try utils.memberName(self.allocator, arg.struct_instance.type_name, types.METHOD_TO_STRING);
+                            if (self.env.get(qualified)) |method_val| {
+                                const user_fn = method_val.function.user;
+                                const env = try self.allocator.create(Environment);
+                                env.* = Environment.init(user_fn.closure, self.allocator);
+
+                                try env.define(user_fn.declaration.params[0].name.lexeme, arg);
+
+                                args.items[i] = try self.evaluateBlock(user_fn.declaration.body, env);
+                            } else |_| {}
+                        }
+                    }
+
                     return builtin_fn.func(args.items, self.ctx);
                 },
                 .struct_constructor => |ctor| {
@@ -492,7 +509,7 @@ pub const Interpreter = struct {
     fn evaluateEquality(self: *Interpreter, left: Value, right: Value) InterpreterError!bool {
         if (left == .struct_instance and right == .struct_instance) {
             const type_name = left.struct_instance.type_name;
-            const qualified = try utils.memberName(self.allocator, type_name, "equals");
+            const qualified = try utils.memberName(self.allocator, type_name, types.METHOD_EQUALS);
             if (self.env.get(qualified)) |method_val| {
                 const user_fn = method_val.function.user;
 
