@@ -23,6 +23,7 @@ const FnSignature = struct {
 };
 
 const TypeCheckError = error{
+    NotImplemented,
     TypeMismatch,
     UndefinedField,
     UndefinedVariable,
@@ -116,8 +117,6 @@ pub const TypeChecker = struct {
                     last_type = .unit;
                 },
                 .@"return" => |ret| last_type = try self.checkReturnStatement(ret),
-                .error_declaration => |decl| try self.registerErrorSet(decl),
-                .error_union_declaration => |decl| try self.registerErrorUnion(decl),
                 .struct_declaration => |decl| try self.checkStructDeclarationStatement(decl),
                 .enum_declaration => |decl| try self.checkEnumDeclarationStatement(decl),
             }
@@ -185,7 +184,7 @@ pub const TypeChecker = struct {
 
         // Determine is fallible for try/catch checks
         const previous_fallible = self.in_fallible_fn;
-        self.in_fallible_fn = return_type.isFallible();
+        self.in_fallible_fn = self.isFallible(return_type);
         defer self.in_fallible_fn = previous_fallible;
 
         // Save a restore the previous return type, we might be in a nested function
@@ -195,7 +194,7 @@ pub const TypeChecker = struct {
 
         // Check the body
         const body_type = try self.checkBody(decl.body);
-        if (!body_type.compatible(return_type)) {
+        if (!self.isCompatible(body_type, return_type)) {
             return self.fail(error.TypeMismatch, "Type mismatch: function '{s}' should return {s}, got {s} at line {d}", .{ decl.name.lexeme, @tagName(return_type), @tagName(body_type), decl.name.line });
         }
 
@@ -213,7 +212,7 @@ pub const TypeChecker = struct {
             .unit;
 
         if (self.expected_return_type) |expected| {
-            if (!return_type.compatible(expected)) {
+            if (!self.isCompatible(return_type, expected)) {
                 return self.fail(error.TypeMismatch, "Type mismatch: expected return type {s}, got {s} at line {d}", .{ @tagName(expected), @tagName(return_type), ret.token.line });
             }
         }
@@ -245,6 +244,11 @@ pub const TypeChecker = struct {
                 const info = self.type_registry.get(variant.name.lexeme) orelse break :blk null;
                 switch (info) {
                     .enum_type => {
+                        // An error enum must have only error variants
+                        if (decl.is_error and !info.enum_type.is_error) {
+                            return self.fail(error.TypeMismatch, "Type mismatch: enum '{s}' is not an error enum", .{variant.name.lexeme});
+                        }
+
                         const synthetic = try self.allocator.alloc(types.FieldInfo, 1);
                         synthetic[0] = .{
                             .name = variant.name.lexeme,
@@ -267,6 +271,8 @@ pub const TypeChecker = struct {
         }
 
         try self.type_registry.put(decl.name.lexeme, .{ .enum_type = .{
+            .is_error = decl.is_error,
+            .is_result = false,
             .variants = resolved_variants,
         } });
     }
@@ -298,7 +304,7 @@ pub const TypeChecker = struct {
             .boolean => .bool,
             .int => .int,
             .string => .string,
-            .null, .unit, .error_value => .unit,
+            .null, .unit => .unit,
             .function, .struct_instance => return error.TypeMismatch,
         };
         return .{ .variable = .{ .pipe_type = pipe_type, .mutability = .constant } };
@@ -497,7 +503,9 @@ pub const TypeChecker = struct {
 
     fn checkTry(self: *TypeChecker, try_expr: *ast.Expression.Try) !TypeInfo {
         const inner = try expectType(try self.checkExpression(try_expr.expression));
-        if (!inner.isFallible()) {
+        //
+        // Check that the expression is a result enum (synthesized E!T type)
+        if (!self.isFallible(inner)) {
             return self.fail(error.TypeMismatch, "Type mismatch: 'try' applied to non-fallible expression at line {d}", .{try_expr.token.line});
         }
 
@@ -505,19 +513,22 @@ pub const TypeChecker = struct {
             return self.fail(error.TypeMismatch, "Type mismatch: 'try' used outside a fallible function at line {d}", .{try_expr.token.line});
         }
 
-        // Unwrap and return the ok type
-        return .{ .variable = .{ .pipe_type = inner.error_union.ok_type.*, .mutability = .constant } };
+        // Unwrap the OK variant or propagate the erro upwards
+        const ok_type = self.getResultVariantType(inner, types.RESULT_OK_VARIANT) orelse return error.TypeMismatch;
+
+        return .{ .variable = .{ .pipe_type = ok_type, .mutability = .constant } };
     }
 
     fn checkCatch(self: *TypeChecker, catch_expr: *ast.Expression.Catch) !TypeInfo {
-        // Check left-hand side to be a fallible type
         const left = try expectType(try self.checkExpression(catch_expr.expression));
-        if (!left.isFallible()) {
+        //
+        // Check that the expression is a result enum (synthesized E!T type)
+        if (!self.isFallible(left)) {
             return self.fail(error.TypeMismatch, "Type mismatch: 'catch' applied to non-fallible expression at line {d}", .{catch_expr.token.line});
         }
 
-        // Dereference the ok type
-        const ok_type = left.error_union.ok_type.*;
+        // Find the ok type from the synthesized res type
+        const ok_type = self.getResultVariantType(left, types.RESULT_OK_VARIANT) orelse return error.TypeMismatch;
 
         // Used in the if, but Zig's defer fires in the block scope, not function scope
         // We need to restore the environment when checkCatch() returns
@@ -528,9 +539,10 @@ pub const TypeChecker = struct {
         if (catch_expr.binding) |binding| {
             var inner_env = try self.allocator.create(TypeEnvironment);
             inner_env.* = TypeEnvironment.init(self.env, self.allocator);
-            try inner_env.define(binding.lexeme, .{ .variable = .{ .pipe_type = .{
-                .error_set = left.error_union.error_set orelse "Error",
-            }, .mutability = .constant } });
+
+            // We bind the types.RESULT_ERR_VARIANT value to the inline scope
+            const err_type = self.getResultVariantType(left, types.RESULT_ERR_VARIANT) orelse return error.TypeMismatch;
+            try inner_env.define(binding.lexeme, .{ .variable = .{ .pipe_type = err_type, .mutability = .constant } });
 
             self.env = inner_env;
         }
@@ -587,24 +599,60 @@ pub const TypeChecker = struct {
                 // Find the ok type
                 const ok_type = try self.allocator.create(PipeType);
                 ok_type.* = try self.resolveTypeAnnotation(inner.*);
-                return .{ .error_union = .{
-                    .error_set = null,
-                    .ok_type = ok_type,
-                } };
+                return error.NotImplemented;
             },
             .explicit_error_union => |eu| {
-                // An explicit type was used, but we don't have the error set
-                if (!self.error_sets.contains(eu.error_set.lexeme)) {
-                    return error.UndefinedType;
+                // Guard clauses
+                const error_info = self.type_registry.get(eu.error_set.lexeme) orelse return error.UndefinedType;
+                if (error_info != .enum_type) {
+                    return error.TypeMismatch;
                 }
 
-                // Find the ok type
+                if (!error_info.enum_type.is_error) {
+                    return self.fail(error.TypeMismatch, "Type mismatch: '{s}' is not an error enum. Only error enums are allowed in error position", .{eu.error_set.lexeme});
+                }
+
+                // Here we have to build a synthezised type for E!T
+
+                // 1. Find the Ok type
                 const ok_type = try self.allocator.create(PipeType);
                 ok_type.* = try self.resolveTypeAnnotation(eu.ok_type.*);
-                return .{ .error_union = .{
-                    .error_set = eu.error_set.lexeme,
-                    .ok_type = ok_type,
-                } };
+
+                // 2. Generate the E!T name
+                const name = try utils.resultQualifiedName(
+                    self.allocator,
+                    eu.error_set.lexeme,
+                    pipeTypeName(ok_type.*),
+                );
+
+                // 3. Synthesize the type
+                //
+                // EnumTypeInfo (is_result = true)
+                // ├── VariantTypeInfo types.RESULT_OK_VARIANT
+                // │   └── FieldInfo "value" : ok_type
+                // └── VariantTypeInfo types.RESULT_ERR_VARIANT
+                //     └── FieldInfo "err" : enum_type(error_set_name)
+
+                // First, the field slices
+                const ok_fields = try self.allocator.alloc(types.FieldInfo, 1);
+                ok_fields[0] = .{ .name = "value", .pipe_type = ok_type.*, .mutability = .constant };
+
+                const err_fields = try self.allocator.alloc(types.FieldInfo, 1);
+                err_fields[0] = .{ .name = "err", .pipe_type = .{ .enum_type = eu.error_set.lexeme }, .mutability = .constant };
+
+                // Then allocate the variant slice
+                const variants = try self.allocator.alloc(types.VariantTypeInfo, 2);
+                variants[0] = .{ .name = types.RESULT_OK_VARIANT, .fields = ok_fields };
+                variants[1] = .{ .name = types.RESULT_ERR_VARIANT, .fields = err_fields };
+
+                // Register and return
+                try self.type_registry.put(name, .{ .enum_type = .{
+                    .is_error = false,
+                    .is_result = true,
+                    .variants = variants,
+                } });
+
+                return .{ .enum_type = name };
             },
         };
     }
@@ -666,23 +714,59 @@ pub const TypeChecker = struct {
         return false;
     }
 
-    // Register an error set in the error registry
-    // error MyError = { Err1, Err2 } becomes { "MyError": ["Err1", "Err2"] }
-    fn registerErrorSet(self: *TypeChecker, decl: ast.Statement.ErrorDeclaration) !void {
-        const variants = try self.allocator.alloc([]const u8, decl.variants.len);
-        for (decl.variants, 0..) |variant, i| {
-            variants[i] = variant.lexeme;
+    // Like PipeType.compatible but also allows T where E!T is expected (implicit Ok wrapping).
+    fn isCompatible(self: *TypeChecker, from: PipeType, to: PipeType) bool {
+        if (from.compatible(to)) return true;
+        if (self.getResultVariantType(to, types.RESULT_OK_VARIANT)) |ok_type| {
+            return from.compatible(ok_type);
         }
-        try self.error_sets.put(decl.name.lexeme, variants);
+        return false;
     }
 
-    // Register an error union in the error registry
-    // error MyError = Err1 | Err2 becomes { "MyError": ["Err1", "Err2"] }
-    fn registerErrorUnion(self: *TypeChecker, decl: ast.Statement.ErrorUnionDeclaration) !void {
-        const members = try self.allocator.alloc([]const u8, decl.members.len);
-        for (decl.members, 0..) |member, i| {
-            members[i] = member.lexeme;
+    // Return true if the type is a result enum
+    fn isFallible(self: *TypeChecker, t: PipeType) bool {
+        if (t != .enum_type) {
+            return false;
         }
-        try self.error_sets.put(decl.name.lexeme, members);
+
+        const info = self.type_registry.get(t.enum_type) orelse return false;
+        return info.enum_type.is_result;
+    }
+
+    // Returns the field type of a named variant in a result enum, or null
+    fn getResultVariantType(self: *TypeChecker, t: PipeType, variant_name: []const u8) ?PipeType {
+        if (t != .enum_type) {
+            return null;
+        }
+        const info = self.type_registry.get(t.enum_type) orelse return null;
+
+        if (!info.enum_type.is_result) {
+            return null;
+        }
+
+        // Iterate through the variants to find the variant with the given name
+        for (info.enum_type.variants) |v| {
+            if (std.mem.eql(u8, v.name, variant_name)) {
+                if (v.fields.len == 1) {
+                    return v.fields[0].pipe_type;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    // Returns the name of a PipeType
+    fn pipeTypeName(t: PipeType) []const u8 {
+        return switch (t) {
+            .int => "Int",
+            .string => "String",
+            .bool => "Bool",
+            .float => "Float",
+            .unit => "Unit",
+            .any => "Any",
+            .struct_type => |name| name,
+            .enum_type => |name| name,
+        };
     }
 };

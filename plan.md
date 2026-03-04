@@ -47,19 +47,20 @@ Each phase is self-contained and testable.
 - [x] Parser, type checker, interpreter: mechanical rename to match
 - [x] Types: rename `PipeType.union_type` → `PipeType.enum_type`, `UnionTypeInfo` → `EnumTypeInfo`, `VariantTypeInfo` stays
 - [x] Update all tests and syntax references
-- [ ] Remove vestigial `PipeType.error_set` and `PipeType.error_union` variants — deferred to Phase 4 (still power existing try/catch system)
+- [x] Remove vestigial `PipeType.error_set` and `PipeType.error_union` variants — deferred to Phase 4 (still power existing try/catch system)
 
 ### Phase 4: Error payloads & errors as values
-- [ ] Lexer: add `try` and `catch` keywords (`error` already exists — verify and keep)
-- [ ] AST: add `is_error: bool` to `EnumDeclaration` — no new node needed
-- [ ] AST: add `Expression.try_expr`, `Expression.catch_expr` (binding name + body)
-- [ ] Parser: `error enum Name { ... }` → sets `is_error = true`, otherwise identical to `enum`
-- [ ] Parser: `try expr`, `expr catch |e| { ... }`
-- [ ] Types: add `is_error: bool` to `EnumTypeInfo` — no new type variant needed
-- [ ] Types: remove vestigial `PipeType.error_set` and `PipeType.error_union` — superseded by synthesized enum
-- [ ] Type checker: propagate `is_error` when registering; enforce that composed variants inside an `error enum` are themselves `error enum`s
-- [ ] Type checker: validate `!T` error side must be an `is_error` enum
-- [ ] Type checker: `E!T` synthesizes a concrete `EnumTypeInfo` with two variants — `Ok` (fields: `[T]`) and `Error` (fields: `[E]`) — no new PipeType variant needed
+- [x] Lexer: add `try` and `catch` keywords (`error` already exists — verify and keep)
+- [x] AST: add `is_error: bool` to `EnumDeclaration` — no new node needed
+- [x] AST: add `Expression.try_expr`, `Expression.catch_expr` (binding name + body)
+- [x] Parser: `error enum Name { ... }` → sets `is_error = true`, otherwise identical to `enum`
+- [x] Parser: `try expr`, `expr catch |e| { ... }`
+- [x] Types: add `is_error: bool` to `EnumTypeInfo` — no new type variant needed
+- [x] Types: remove vestigial `PipeType.error_set` and `PipeType.error_union` — superseded by synthesized enum
+- [x] Type checker: propagate `is_error` when registering; enforce that composed variants inside an `error enum` are themselves `error enum`s
+- [x] Type checker: validate `!T` error side must be an `is_error` enum
+- [x] Type checker: `E!T` synthesizes a concrete `EnumTypeInfo` with two variants — `Ok` (fields: `[T]`) and `Err` (fields: `[E]`) — no new PipeType variant needed
+- [x] Type checker: `try` — caller must also return `!T`, propagates error type upward; `catch` — valid on fallible expression only; rejected on non-fallible
 - [ ] Type checker: `!T` is a first-class type — a `!T` value cannot be used where `T` is expected without unwrapping via `try`, `catch`, or `when`
 - [ ] Type checker: discarding a `!T` result with no binding (`foo();`) is a compile error; explicit discard (`const _ = foo()`) is allowed
 - [ ] Type checker: scope-level pending-set tracking — each scope maintains a set of unresolved `!T` bindings; all must be consumed before scope exit
@@ -68,10 +69,9 @@ Each phase is self-contained and testable.
 - [ ] Type checker: reassignment — overwriting a `var` binding holding an unconsumed `!T` is a compile error
 - [ ] Type checker: loop body — pending `!T` bindings must be consumed before `break`, `continue`, or looping back
 - [ ] Type checker: consumption — `try`, `catch`, `when`, `return res`, passing as argument, and rebinding (`const other = res`) all consume a `!T` binding; rebinding transfers the obligation to the new name
-- [ ] Type checker: `try` — caller must also return `!T`, propagates error type upward
-- [ ] Interpreter: `!T` values are `Value.enum_instance` — `Ok` variant wraps the success value, `Error` variant wraps the error; no new Value variants needed
-- [ ] Interpreter: `try` — match on `Ok`/`Error` variant, unwrap or propagate; `catch` — match on `Ok`/`Error`, unwrap or bind and execute handler
-- [ ] Interpreter: `value =>` / `error =>` arms in `when` are sugar for matching `Ok` / `Error` variants
+- [x] Interpreter: `!T` values are `Value.enum_instance` — `Ok` variant wraps the success value, `Err` variant wraps the error; no new Value variants needed; `result_name` computed in `executeFnDeclarationStatement`
+- [ ] Interpreter: `try` — match on `Ok`/`Err` variant, unwrap or propagate; `catch` — match on `Ok`/`Err`, unwrap or bind and execute handler (stubbed as `NotImplemented`)
+- [ ] Interpreter: `value =>` / `error =>` arms in `when` are sugar for matching `Ok` / `Err` variants
 - [ ] Tests: declare error enum, catch and access fields, deferred binding (`const res = foo(); when (res) { ... }`), unconsumed binding errors, branch merge errors, reassignment error, composed error enums
 
 ### Phase 5: Struct methods
@@ -104,7 +104,7 @@ Each phase is self-contained and testable.
 - **Union variant fields use `var`/`const`**: same rule as struct fields — scripting pragmatism over FP purity
 - **Enum composition nests, not flattens**: `enum AppError { UserError, ValidationError }` makes `UserError` a variant wrapping the inner enum — enables grouped pattern matching (`AppError.UserError(_)` catches all user errors)
 - **Errors are values**: fallible functions return a result wrapper, not a control-flow signal. `try`, `catch`, and `when` are the three ways to handle them. Enforcement is at the type level, not the call site — a `!T` value cannot be used as `T` without unwrapping.
-- **`!T` is a synthesized enum**: `E!T` is syntax sugar — the type checker synthesizes a concrete `EnumTypeInfo` with `Ok(T)` and `Error(E)` variants. No new PipeType variant needed; all enum machinery (dispatch, `when` matching, interpreter values) works as-is. `value =>` / `error =>` arm syntax in `when` is sugar for matching `Ok` / `Error` variants.
+- **`!T` is a synthesized enum**: `E!T` is syntax sugar — the type checker synthesizes a concrete `EnumTypeInfo` with `Ok(T)` and `Err(E)` variants. No new PipeType variant needed; all enum machinery (dispatch, `when` matching, interpreter values) works as-is. `value =>` / `error =>` arm syntax in `when` is sugar for matching `Ok` / `Err` variants.
 - **`!T` consumption is tracked**: the type checker maintains a pending-set of unresolved `!T` bindings per scope. All bindings must be consumed (via `try`, `catch`, `when`, `return`, passing as argument, or rebinding) before scope exit, branch merge, or early exit. Discarding a `!T` result with no binding is a compile error. Reassigning over an unconsumed `!T` binding is a compile error.
 - **`error enum` reuses enum machinery**: an `error enum` is an enum with `is_error: bool` set — no new type variant, no parallel registry path. Only difference: can appear in `!T` position, and composed variants must themselves be `error enum`s.
 - **`is_error` is a marker, not a kind**: analogous to Swift's `Error` protocol conformance or Kotlin's sealed modifier — a boolean flag on `EnumTypeInfo`, not a separate type kind. A kind enum would be over-engineering for a single distinction.

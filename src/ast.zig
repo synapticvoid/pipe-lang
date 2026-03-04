@@ -15,13 +15,6 @@ pub const Statement = union(enum) {
     // Control flow
     @"return": Return,
 
-    // Errors
-    // error Name { Variant1, Variant2 }
-    error_declaration: ErrorDeclaration,
-
-    // error Name = A | B
-    error_union_declaration: ErrorUnionDeclaration,
-
     // Structs
     struct_declaration: StructDeclaration,
     enum_declaration: EnumDeclaration,
@@ -50,17 +43,6 @@ pub const Statement = union(enum) {
         value: ?Expression,
     };
 
-    pub const ErrorDeclaration = struct {
-        name: Token,
-        variants: []const Token,
-    };
-
-    pub const ErrorUnionDeclaration = struct {
-        name: Token,
-        // Existing error type names being unioned
-        members: []const Token,
-    };
-
     pub const StructDeclaration = struct {
         name: Token,
         fields: []const FieldDeclaration,
@@ -69,6 +51,7 @@ pub const Statement = union(enum) {
 
     pub const EnumDeclaration = struct {
         name: Token,
+        is_error: bool,
         variants: []const Variant,
     };
 
@@ -197,7 +180,7 @@ pub const Value = union(enum) {
     function: Callable,
     null,
     unit,
-    error_value: struct { message: []const u8 },
+
     // pointer because we want to be able to this
     // var u1 = User("Bob");
     // var u2 = u1;
@@ -251,7 +234,7 @@ pub const Value = union(enum) {
 
     pub fn isTruthy(self: Value) bool {
         return switch (self) {
-            .null, .unit, .error_value => false,
+            .null, .unit => false,
             .boolean => |b| b,
             .int => |n| n != 0,
             .function => true,
@@ -272,7 +255,6 @@ pub const Value = union(enum) {
             },
             .null => try writer.writeAll("null"),
             .unit => try writer.writeAll("unit"),
-            .error_value => |e| try writer.print("error<{s}>", .{e.message}),
             .struct_instance => |si_ptr| {
                 const si = si_ptr.*;
                 switch (si.kind) {

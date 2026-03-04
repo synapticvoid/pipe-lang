@@ -33,7 +33,6 @@ pub const Interpreter = struct {
     known_enum_names: std.StringHashMap(void),
     ctx: RuntimeContext,
     return_value: ?Value = null,
-    error_value: ?Value = null,
     allocator: std.mem.Allocator,
 
     pub fn init(ctx: RuntimeContext, allocator: std.mem.Allocator) !Interpreter {
@@ -67,8 +66,6 @@ pub const Interpreter = struct {
             .fn_declaration => |decl| try self.executeFnDeclarationStatement(decl),
             .expression => |expr| _ = try self.evaluate(expr),
             .@"return" => |r| try self.executeReturnStatement(r),
-            .error_declaration => |decl| _ = decl,
-            .error_union_declaration => |decl| _ = decl,
             .struct_declaration => |decl| try self.executeStructDeclarationStatement(decl),
             .enum_declaration => |decl| try self.executeEnumDeclaration(decl),
         }
@@ -80,7 +77,28 @@ pub const Interpreter = struct {
     }
 
     fn executeFnDeclarationStatement(self: *Interpreter, decl: ast.Statement.FnDeclaration) !void {
-        const user_fn = Callable.UserFn{ .closure = self.env, .declaration = decl };
+        // For fallible functions (return type E!T), compute the synthesized result enum
+        // name (e.g. MathError!Int) so that callUserFn can wrap the return value
+        // in the correct Ok/Err variant at runtime.
+        // For non fallible functions (no return type, or plain named return), this is null
+        const result_name: ?[]const u8 = if (decl.return_type) |ret| switch (ret) {
+            .explicit_error_union => |eu| blk: {
+                // ok_type is a *PipeTypeAnnotation - switch on the pointee to extract the name.
+                // Complex ok types (nested error unions) are not supported yet
+                const ok_name: ?[]const u8 = switch (eu.ok_type.*) {
+                    .named => |tok| tok.lexeme,
+                    else => null,
+                };
+
+                if (ok_name) |name| {
+                    break :blk try utils.resultQualifiedName(self.allocator, eu.error_set.lexeme, name);
+                }
+                break :blk null;
+            },
+            else => null,
+        } else null;
+
+        const user_fn = Callable.UserFn{ .closure = self.env, .declaration = decl, .result_name = result_name };
         try self.env.define(decl.name.lexeme, .{ .function = .{ .user = user_fn } });
     }
 
@@ -245,34 +263,17 @@ pub const Interpreter = struct {
     }
 
     fn evaluateTry(self: *Interpreter, e: *Expression.Try) InterpreterError!Value {
-        const result = try self.evaluate(e.expression);
-        return switch (result) {
-            .error_value => {
-                self.error_value = result;
-                return error.ErrorSignal;
-            },
-            else => result,
-        };
+        // TODO: match on Ok/Err variants once result enum synthesis is in place
+        _ = self;
+        _ = e;
+        return error.NotImplemented;
     }
 
     fn evaluateCatch(self: *Interpreter, e: *Expression.Catch) InterpreterError!Value {
-        const left = try self.evaluate(e.expression);
-        return switch (left) {
-            .error_value => {
-                const previous = self.env;
-                defer self.env = previous;
-
-                if (e.binding) |binding| {
-                    const env = try self.allocator.create(Environment);
-                    env.* = Environment.init(self.env, self.allocator);
-                    try env.define(binding.lexeme, left);
-                    self.env = env;
-                }
-
-                return try self.evaluate(e.handler);
-            },
-            else => left,
-        };
+        // TODO: match on Ok/Err variants once result enum synthesis is in place
+        _ = self;
+        _ = e;
+        return error.NotImplemented;
     }
 
     fn evaluateStructInit(_: *Interpreter, _: *Expression.StructInit) InterpreterError!Value {
@@ -349,8 +350,7 @@ pub const Interpreter = struct {
                 return value;
             },
             error.ErrorSignal => {
-                const value = self.error_value orelse Value.unit;
-                self.error_value = null;
+                const value = Value.unit;
                 return value;
             },
             else => return err,

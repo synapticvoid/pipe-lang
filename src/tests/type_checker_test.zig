@@ -52,12 +52,15 @@ test "var type mismatch on reassignment" {
 
 // -- Error type declarations
 
-test "error declaration is valid" {
-    try expectTypeCheck("error MathError { DivByZero, Overflow }");
+test "error enum declaration is valid" {
+    try expectTypeCheck("error enum MathError { DivByZero, Overflow }");
 }
 
-test "error union declaration is valid" {
-    try expectTypeCheck("error MathError { DivByZero } error AppError = MathError | MathError");
+test "error enum composition is valid" {
+    try expectTypeCheck(
+        \\error enum MathError { DivByZero }
+        \\error enum AppError { MathError }
+    );
 }
 
 test "explicit error union with unknown error set is rejected" {
@@ -71,14 +74,8 @@ test "explicit error union with unknown error set is rejected" {
 
 test "fallible function with ok return is valid" {
     try expectTypeCheck(
-        \\error MathError { DivByZero }
+        \\error enum MathError { DivByZero }
         \\fn divide(a: Int, b: Int) MathError!Int { a / b; }
-    );
-}
-
-test "inferred error union is valid" {
-    try expectTypeCheck(
-        \\fn mayFail(x: Int) !Int { x; }
     );
 }
 
@@ -86,15 +83,15 @@ test "inferred error union is valid" {
 
 test "try inside fallible function is valid" {
     try expectTypeCheck(
-        \\error MathError { DivByZero }
+        \\error enum MathError { DivByZero }
         \\fn divide(a: Int, b: Int) MathError!Int { a / b; }
-        \\fn safe(a: Int, b: Int) !Int { try divide(a, b); }
+        \\fn safe(a: Int, b: Int) MathError!Int { try divide(a, b); }
     );
 }
 
 test "try outside fallible function is rejected" {
     try expectTypeError(
-        \\error MathError { DivByZero }
+        \\error enum MathError { DivByZero }
         \\fn divide(a: Int, b: Int) MathError!Int { a / b; }
         \\fn safe(a: Int, b: Int) Int { try divide(a, b); }
     );
@@ -102,8 +99,9 @@ test "try outside fallible function is rejected" {
 
 test "try on non-fallible expression is rejected" {
     try expectTypeError(
+        \\error enum DummyError { Fail }
         \\fn add(a: Int, b: Int) Int { a + b; }
-        \\fn safe(a: Int, b: Int) !Int { try add(a, b); }
+        \\fn safe(a: Int, b: Int) DummyError!Int { try add(a, b); }
     );
 }
 
@@ -111,7 +109,7 @@ test "try on non-fallible expression is rejected" {
 
 test "catch on fallible expression is valid" {
     try expectTypeCheck(
-        \\error MathError { DivByZero }
+        \\error enum MathError { DivByZero }
         \\fn divide(a: Int, b: Int) MathError!Int { a / b; }
         \\fn safe(a: Int, b: Int) Int { divide(a, b) catch { -1; }; }
     );
@@ -119,7 +117,7 @@ test "catch on fallible expression is valid" {
 
 test "catch with binding is valid" {
     try expectTypeCheck(
-        \\error MathError { DivByZero }
+        \\error enum MathError { DivByZero }
         \\fn divide(a: Int, b: Int) MathError!Int { a / b; }
         \\fn safe(a: Int, b: Int) Int { divide(a, b) catch |e| { -1; }; }
     );

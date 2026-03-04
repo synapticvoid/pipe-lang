@@ -3,6 +3,9 @@ const activeTag = std.meta.activeTag;
 
 const ast = @import("ast.zig");
 
+pub const RESULT_OK_VARIANT = "Ok";
+pub const RESULT_ERR_VARIANT = "Err";
+
 pub const PipeType = union(enum) {
     int,
     float,
@@ -15,18 +18,6 @@ pub const PipeType = union(enum) {
 
     struct_type: []const u8,
     enum_type: []const u8,
-
-    // Errors
-
-    // error MyError { V1, V2 }
-    error_set: []const u8,
-
-    // E!T or !T
-    error_union: struct {
-        // null == inferred (!T)
-        error_set: ?[]const u8,
-        ok_type: *PipeType,
-    },
 
     pub fn isNumeric(self: PipeType) bool {
         switch (self) {
@@ -55,21 +46,7 @@ pub const PipeType = union(enum) {
             return true;
         }
 
-        if (self_tag == .error_set and other_tag == .error_set) {
-            return true;
-        }
-
-        // T is compatible with E!T (returing an ok value from a fallible function)
-        if (other_tag == .error_union) {
-            return self.compatible(other.error_union.ok_type.*);
-        }
-
         return false;
-    }
-
-    // Returns true of this type carries a possible error
-    pub fn isFallible(self: PipeType) bool {
-        return activeTag(self) == .error_union;
     }
 
     // Return true if self's error is a subset of other's (for try/catch checking)
@@ -93,6 +70,12 @@ pub const StructTypeInfo = struct {
 };
 
 pub const EnumTypeInfo = struct {
+    // true for a user-declared user enum, a type that can appear i E!T position
+    is_error: bool,
+
+    // internal only - marks the synthesized Ok/Err enum.
+    // It's an internal wrapper the type checker creates fro E!T
+    is_result: bool,
     variants: []const VariantTypeInfo,
 };
 

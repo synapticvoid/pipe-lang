@@ -60,20 +60,12 @@ pub const Parser = struct {
         }
 
         if (self.match(&.{.@"enum"})) {
-            return .{ .enum_declaration = try self.parseEnumDeclarationStatement() };
+            return .{ .enum_declaration = try self.parseEnumDeclarationStatement(false) };
         }
 
         if (self.match(&.{.@"error"})) {
-            const name = try self.consume(.identifier, "Expect error type name");
-
-            // error Name { V1, V2 }
-            if (self.match(&.{.lbrace})) {
-                return .{ .error_declaration = try self.parseErrorDeclarationStatement(name) };
-            }
-
-            // error Name = A | B
-            if (self.match(&.{.equal})) {
-                return .{ .error_union_declaration = try self.parseErrorUnionDeclarationStatement(name) };
+            if (self.match(&.{.@"enum"})) {
+                return .{ .enum_declaration = try self.parseEnumDeclarationStatement(true) };
             }
 
             return error.UnexpectedToken;
@@ -171,7 +163,7 @@ pub const Parser = struct {
         return .{ .name = name, .kind = kind, .fields = fields };
     }
 
-    fn parseEnumDeclarationStatement(self: *Parser) !ast.Statement.EnumDeclaration {
+    fn parseEnumDeclarationStatement(self: *Parser, is_error: bool) !ast.Statement.EnumDeclaration {
         const name = try self.consume(.identifier, "Expect enum name.");
         _ = try self.consume(.lbrace, "Expect '{' after enum name.");
 
@@ -198,38 +190,8 @@ pub const Parser = struct {
 
         return .{
             .name = name,
+            .is_error = is_error,
             .variants = variants.items,
-        };
-    }
-
-    fn parseErrorDeclarationStatement(self: *Parser, name: Token) ParseError!ast.Statement.ErrorDeclaration {
-        var variants: std.ArrayList(Token) = .{};
-        if (!self.check(.rbrace)) {
-            try variants.append(self.allocator, try self.consume(.identifier, "Expect error variant name"));
-            while (self.match(&.{.comma})) {
-                try variants.append(self.allocator, try self.consume(.identifier, "Expect error variant name"));
-            }
-        }
-
-        _ = try self.consume(.rbrace, "Expect '}' after error variant list.");
-
-        return .{
-            .name = name,
-            .variants = variants.items,
-        };
-    }
-
-    fn parseErrorUnionDeclarationStatement(self: *Parser, name: Token) ParseError!ast.Statement.ErrorUnionDeclaration {
-        var members: std.ArrayList(Token) = .{};
-
-        try members.append(self.allocator, try self.consume(.identifier, "Expect error union member name"));
-        while (self.match(&.{.pipe})) {
-            try members.append(self.allocator, try self.consume(.identifier, "Expect error union member name"));
-        }
-
-        return .{
-            .name = name,
-            .members = members.items,
         };
     }
 

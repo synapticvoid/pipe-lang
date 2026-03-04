@@ -9,6 +9,9 @@ pub const Callable = union(enum) {
 
     pub const UserFn = struct {
         declaration: ast.Statement.FnDeclaration,
+        // Synthezised result enum name (e.g. MathError!Int) if fallible, null otherwise.
+        // Used at call time to wrap the return value in Ok or Err
+        result_name: ?[]const u8,
         closure: *Environment,
     };
 
