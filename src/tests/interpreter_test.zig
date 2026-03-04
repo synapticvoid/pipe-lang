@@ -224,6 +224,17 @@ test "struct passed to function" {
     });
 }
 
+test "struct field assignment" {
+    try expectEval(.{
+        .{
+            \\case struct User(const id: Int, var name: String);
+            \\var u = User(1, "Alice");
+            \\u.name = "Bob";
+            \\u.name;
+        , "\"Bob\"" },
+    });
+}
+
 test "struct print" {
     try expectOutput(.{
         .{ "case struct User(const id: Int, const name: String); print(User(1, \"Alice\"));", "User(id=1, name=\"Alice\")\n" },

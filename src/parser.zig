@@ -290,6 +290,11 @@ pub const Parser = struct {
                     assignment.* = .{ .token = expr.variable.token, .value = value };
                     return ast.Expression{ .var_assignment = assignment };
                 },
+                .field_access => |fa| {
+                    const assignment = try self.allocator.create(ast.Expression.FieldAssignment);
+                    assignment.* = .{ .object = fa.object, .name = fa.name, .value = value };
+                    return .{ .field_assignment = assignment };
+                },
                 else => {
                     self.last_error = std.fmt.allocPrint(self.allocator, "Invalid assignment target. token: {s}", .{equals.lexeme}) catch null;
                     return error.InvalidAssignmentTarget;

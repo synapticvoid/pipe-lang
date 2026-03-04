@@ -94,6 +94,7 @@ pub const Expression = union(enum) {
     // Structs
     struct_init: *StructInit,
     field_access: *FieldAccess,
+    field_assignment: *FieldAssignment,
 
     // -------------------------------------------------------------------
 
@@ -172,6 +173,14 @@ pub const Expression = union(enum) {
         object: Expression,
         name: Token,
     };
+
+    // u.name = "Alice";
+    // object.name = value
+    pub const FieldAssignment = struct {
+        object: Expression,
+        name: Token,
+        value: Expression,
+    };
 };
 
 pub const Value = union(enum) {
@@ -191,7 +200,7 @@ pub const Value = union(enum) {
     pub const StructInstance = struct {
         type_name: []const u8,
         field_names: []const []const u8,
-        field_values: []const Value,
+        field_values: []Value,
         kind: StructKind,
     };
 

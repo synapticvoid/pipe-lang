@@ -212,6 +212,22 @@ test "struct static method call" {
     );
 }
 
+test "field assignment to var field type checks" {
+    try expectTypeCheck(
+        \\case struct User(const id: Int, var name: String);
+        \\var u = User(1, "Alice");
+        \\u.name = "Bob";
+    );
+}
+
+test "field assignment to const field rejected" {
+    try expectConstError(
+        \\case struct User(const id: Int, var name: String);
+        \\var u = User(1, "Alice");
+        \\u.id = 2;
+    );
+}
+
 // -- Enums
 
 test "enum declaration is valid" {

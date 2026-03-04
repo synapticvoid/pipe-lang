@@ -84,7 +84,7 @@ Each phase is self-contained and testable.
 - [x] Tests: toString/equals override
 
 ### Phase 6: Mutability & long form
-- [ ] Per-field `const`/`var` enforcement (prevent assignment to `const` fields)
+- [x] Per-field `const`/`var` enforcement (prevent assignment to `const` fields)
 - [ ] Long form struct with computed defaults (`const created_at: Int = now();`)
 - [ ] `init {}` guard block (future — validation only, no field assignment, no `self`)
 - [ ] Tests: const enforcement, computed defaults

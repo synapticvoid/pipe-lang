@@ -383,6 +383,7 @@ pub const TypeChecker = struct {
             },
             .struct_init => |in| try self.checkInit(in),
             .field_access => |fa| self.checkFieldAccess(fa),
+            .field_assignment => |fa| self.checkFieldAssignment(fa),
         };
     }
 
@@ -670,6 +671,43 @@ pub const TypeChecker = struct {
                 return self.fail(error.UndefinedType, "Undefined variant '{s}'", .{field_access.name.lexeme});
             },
         };
+    }
+
+    fn checkFieldAssignment(self: *TypeChecker, fa: *ast.Expression.FieldAssignment) TypeCheckError!SymbolInfo {
+        const obj_type = try asPipeType(try self.checkExpression(fa.object));
+
+        // Check that the object is a struct
+        const struct_name = switch (obj_type) {
+            .struct_type => |name| name,
+            else => return error.TypeMismatch,
+        };
+
+        const info = self.type_registry.get(struct_name) orelse return error.UndefinedType;
+        const struct_type = switch (info) {
+            .struct_type => |s| s,
+            else => return error.TypeMismatch,
+        };
+
+        // Find the field
+        for (struct_type.fields) |field| {
+            if (std.mem.eql(u8, field.name, fa.name.lexeme)) {
+                if (field.mutability == .constant) {
+                    return self.fail(error.ConstReassignment, "Cannot assign to constant field '{s}'", .{fa.name.lexeme});
+                }
+
+                const value_type = try asPipeType(try self.checkExpression(fa.value));
+                if (!field.pipe_type.compatible(value_type)) {
+                    return self.fail(error.TypeMismatch, "Type mismatch: expected {s}, got {s}", .{
+                        @tagName(field.pipe_type),
+                        @tagName(value_type),
+                    });
+                }
+
+                return .{ .variable = .{ .pipe_type = field.pipe_type, .mutability = field.mutability } };
+            }
+        }
+
+        return error.UndefinedField;
     }
 
     fn checkTry(self: *TypeChecker, try_expr: *ast.Expression.Try) !SymbolInfo {

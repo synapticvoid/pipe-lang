@@ -190,6 +190,7 @@ pub const Interpreter = struct {
             .catch_expr => |e| self.evaluateCatch(e),
             .struct_init => |e| self.evaluateStructInit(e),
             .field_access => |e| self.evaluateFieldAccess(e),
+            .field_assignment => |e| self.evaluateFieldAssignment(e),
         };
     }
 
@@ -392,6 +393,27 @@ pub const Interpreter = struct {
         } else |_| {}
 
         return InterpreterError.UndefinedField;
+    }
+
+    fn evaluateFieldAssignment(self: *Interpreter, e: *Expression.FieldAssignment) InterpreterError!Value {
+        // Evaluate object first
+        const obj = try self.evaluate(e.object);
+
+        const inst = switch (obj) {
+            .struct_instance => |ptr| ptr,
+            else => return InterpreterError.TypeError,
+        };
+
+        // Find field index in field_names and update it's value
+        for (inst.field_names, 0..) |name, i| {
+            if (std.mem.eql(u8, name, e.name.lexeme)) {
+                const value = try self.evaluate(e.value);
+                inst.field_values[i] = value;
+                return value;
+            }
+        }
+
+        return error.UndefinedField;
     }
 
     fn evaluateBlock(self: *Interpreter, statements: []const ast.Statement, env: *Environment) !ast.Value {
