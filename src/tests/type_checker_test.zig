@@ -126,7 +126,15 @@ test "catch with binding is valid" {
     try expectTypeCheck(
         \\error enum MathError { DivByZero }
         \\fn divide(a: Int, b: Int) MathError!Int { a / b; }
-        \\fn safe(a: Int, b: Int) Int { divide(a, b) catch |e| { -1; }; }
+        \\fn safe(a: Int, b: Int) Int { divide(a, b) catch e { -1; }; }
+    );
+}
+
+test "catch one-liner with binding is valid" {
+    try expectTypeCheck(
+        \\error enum MathError { DivByZero }
+        \\fn divide(a: Int, b: Int) MathError!Int { a / b; }
+        \\fn safe(a: Int, b: Int) Int { divide(a, b) catch e => -1; }
     );
 }
 

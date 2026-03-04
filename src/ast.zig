@@ -159,7 +159,7 @@ pub const Expression = union(enum) {
         // The fallible left-hand side
         expression: Expression,
 
-        // The |e| capture, null if omitted
+        // The catch binding (e.g. `catch e { ... }`), null if omitted
         binding: ?Token,
         handler: Expression,
     };

@@ -412,15 +412,36 @@ pub const Parser = struct {
     fn parseCatchSuffix(self: *Parser, expr: ast.Expression) ParseError!*ast.Expression.Catch {
         const keyword = self.previous();
 
-        // Parse optional |binding|
         var binding: ?Token = null;
-        if (self.match(&.{.pipe})) {
-            binding = try self.consume(.identifier, "Expect binding name");
-            _ = try self.consume(.pipe, "Expect '|' after binding.");
-        }
 
-        // Parse handler expression
-        const handler = try self.parseExpression();
+        // catch { ... }
+        // catch e { ... }
+        // catch expr
+        // catch e => expr
+        const handler: ast.Expression = blk: {
+            if (self.check(.lbrace)) {
+                break :blk .{ .block = try self.parseBlock() };
+            }
+
+            if (self.check(.identifier)) {
+                const candidate_binding = self.advance();
+
+                if (self.match(&.{.fat_arrow})) {
+                    binding = candidate_binding;
+                    break :blk try self.parseExpression();
+                }
+
+                if (self.check(.lbrace)) {
+                    binding = candidate_binding;
+                    break :blk .{ .block = try self.parseBlock() };
+                }
+
+                // Not a binding form; parse as a regular expression handler.
+                self.current -= 1;
+            }
+
+            break :blk try self.parseExpression();
+        };
 
         const catch_expr = try self.allocator.create(ast.Expression.Catch);
         catch_expr.* = .{

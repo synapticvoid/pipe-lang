@@ -58,12 +58,14 @@ fn safeDivide(a: Int, b: Int) !Int {
 const result = divide(10, 0) catch { -1 };
 
 // catch with binding
-const result = divide(10, 0) catch |e| { print(e); -1 };
+const result = divide(10, 0) catch e { print(e); -1 };
+
+// one-liner catch with binding
+const result = divide(10, 0) catch e => -1;
 
 // Untyped error with a message
 fn lookup(id: Int) !String {
     return fail("not found");
 }
 ```
-
 

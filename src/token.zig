@@ -20,6 +20,7 @@ pub const TokenType = enum {
     bang_equal,
     equal,
     equal_equal,
+    fat_arrow,
     greater,
     greater_equal,
     less,

@@ -46,6 +46,26 @@ test "tokenize comparison operators" {
     try std.testing.expectEqualDeep(&expected, tokens);
 }
 
+test "tokenize fat arrow" {
+    const allocator = std.testing.allocator;
+    var lexer = Lexer.init("e => recover(e)", allocator);
+    defer lexer.deinit();
+
+    const tokens = try lexer.tokenize();
+
+    const expected = [_]Token{
+        .{ .type = .identifier, .lexeme = "e", .line = 1 },
+        .{ .type = .fat_arrow, .lexeme = "=>", .line = 1 },
+        .{ .type = .identifier, .lexeme = "recover", .line = 1 },
+        .{ .type = .lparen, .lexeme = "(", .line = 1 },
+        .{ .type = .identifier, .lexeme = "e", .line = 1 },
+        .{ .type = .rparen, .lexeme = ")", .line = 1 },
+        .{ .type = .eof, .lexeme = "", .line = 1 },
+    };
+
+    try std.testing.expectEqualDeep(&expected, tokens);
+}
+
 test "tokenize type system keywords" {
     const allocator = std.testing.allocator;
     var lexer = Lexer.init("struct enum case when self Self", allocator);

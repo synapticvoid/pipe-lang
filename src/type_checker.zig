@@ -771,7 +771,7 @@ pub const TypeChecker = struct {
         const previous = self.env;
         defer self.env = previous;
 
-        // If there's a binding |e|, introduce it in a new scope
+        // If there's a catch binding, introduce it in a new scope
         if (catch_expr.binding) |binding| {
             var inner_env = try self.allocator.create(TypeEnvironment);
             inner_env.* = TypeEnvironment.init(self.env, self.allocator);

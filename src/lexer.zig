@@ -93,7 +93,9 @@ pub const Lexer = struct {
                 }
             },
             '=' => {
-                if (self.match('=')) {
+                if (self.match('>')) {
+                    try self.addToken(.fat_arrow, null);
+                } else if (self.match('=')) {
                     try self.addToken(.equal_equal, null);
                 } else {
                     try self.addToken(.equal, null);

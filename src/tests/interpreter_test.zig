@@ -119,7 +119,7 @@ test "catch passes through ok value" {
         .{
             \\error enum E { Fail, }
             \\fn maybe(x: Int) E!Int { x; }
-            \\maybe(42) catch |e| { 0; };
+            \\maybe(42) catch e { 0; };
             ,
             "42",
         },
@@ -144,7 +144,7 @@ test "catch handles error" {
         .{
             \\error enum E { Fail, }
             \\fn fail() E!Int { E.Fail(); }
-            \\fail() catch |e| { 0; };
+            \\fail() catch e { 0; };
             ,
             "0",
         },
@@ -156,7 +156,19 @@ test "catch with binding exposes error" {
         .{
             \\error enum E { Fail(const code: Int), }
             \\fn fail() E!Int { E.Fail(99); }
-            \\fail() catch |e| { e.code; };
+            \\fail() catch e { e.code; };
+            ,
+            "99",
+        },
+    });
+}
+
+test "catch one-liner with binding handles error" {
+    try expectEval(.{
+        .{
+            \\error enum E { Fail(const code: Int), }
+            \\fn fail() E!Int { E.Fail(99); }
+            \\fail() catch e => e.code;
             ,
             "99",
         },

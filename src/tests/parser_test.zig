@@ -135,3 +135,15 @@ test "parse chained dot access" {
     try std.testing.expectEqualStrings("b", inner.name.lexeme);
     try std.testing.expectEqualStrings("a", inner.object.variable.token.lexeme);
 }
+
+test "parse catch binding with fat arrow" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const result = try helpers.parse("fallible() catch e => recover(e);", allocator);
+
+    const catch_expr = result[0].expression.catch_expr;
+    try std.testing.expectEqualStrings("e", catch_expr.binding.?.lexeme);
+    const handler = catch_expr.handler.fn_call;
+    try std.testing.expectEqualStrings("recover", handler.callee.variable.token.lexeme);
+}
