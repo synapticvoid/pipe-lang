@@ -29,6 +29,7 @@ const TypeCheckError = error{
     UndefinedVariable,
     UndefinedType,
     ConstReassignment,
+    UnconsumedFallible,
     OutOfMemory,
 };
 
@@ -80,6 +81,9 @@ pub const TypeChecker = struct {
     // Last type checker error message
     last_error: ?[]const u8 = null,
 
+    // Tracks unconsumed !T bindinds by name
+    pending_fallibles: std.StringHashMap(void),
+
     allocator: std.mem.Allocator,
 
     // NOTE: -- Public API
@@ -93,6 +97,7 @@ pub const TypeChecker = struct {
             .env = env,
             .error_sets = std.StringHashMap([]const []const u8).init(allocator),
             .type_registry = std.StringHashMap(types.TypeDef).init(allocator),
+            .pending_fallibles = std.StringHashMap(void).init(allocator),
             .allocator = allocator,
         };
     }
@@ -107,7 +112,16 @@ pub const TypeChecker = struct {
         var last_type: PipeType = .unit;
         for (statements) |statement| {
             switch (statement) {
-                .expression => |expr| last_type = try asPipeType(try self.checkExpression(expr)),
+                .expression => |expr| {
+                    const expr_type = try asPipeType(try self.checkExpression(expr));
+                    // Reject discarded !T results
+                    // If the expression is an assignment, we should track it
+                    if (self.isFallible(expr_type) and expr != .var_assignment) {
+                        return self.fail(error.UnconsumedFallible, "Unconsumed fallible expression", .{});
+                    }
+
+                    last_type = expr_type;
+                },
                 .var_declaration => |decl| {
                     try self.checkVarDeclarationStatement(decl);
                     last_type = .unit;
@@ -120,6 +134,10 @@ pub const TypeChecker = struct {
                 .struct_declaration => |decl| try self.checkStructDeclarationStatement(decl),
                 .enum_declaration => |decl| try self.checkEnumDeclarationStatement(decl),
             }
+        }
+
+        if (self.pending_fallibles.count() > 0) {
+            return self.fail(error.UnconsumedFallible, "Unconsumed fallible bindings at scope exit", .{});
         }
 
         return last_type;
@@ -146,6 +164,12 @@ pub const TypeChecker = struct {
             resolved_type = try self.resolveTypeAnnotation(annotation);
         } else {
             return self.fail(error.TypeMismatch, "Type mismatch: '{s}' has no type annotation or initializer at line {d}", .{ decl.name.lexeme, line });
+        }
+
+        // If the resolved_type is !T, track it to check
+        // if it's consumed on scope exit
+        if (self.isFallible(resolved_type) and !std.mem.eql(u8, decl.name.lexeme, "_")) {
+            try self.pending_fallibles.put(decl.name.lexeme, {});
         }
 
         try self.env.define(decl.name.lexeme, .{ .variable = .{
@@ -199,6 +223,11 @@ pub const TypeChecker = struct {
             .return_type = return_type,
         } });
 
+        // Save and reset pending fallibles for this scope
+        const previous_pending = self.pending_fallibles;
+        self.pending_fallibles = std.StringHashMap(void).init(self.allocator);
+        defer self.pending_fallibles = previous_pending;
+
         // Check the body
         const body_type = try self.checkBody(decl.body);
         if (!self.isCompatible(body_type, return_type)) {
@@ -211,6 +240,18 @@ pub const TypeChecker = struct {
             try asPipeType(try self.checkExpression(value))
         else
             .unit;
+
+        // Consume the pending fallible if returning a variable
+        if (ret.value) |value| {
+            if (value == .variable) {
+                _ = self.pending_fallibles.remove(value.variable.token.lexeme);
+            }
+        }
+
+        // Check remaining pending fallibles
+        if (self.pending_fallibles.count() > 0) {
+            return self.fail(error.UnconsumedFallible, "Unconsumed fallible bindings at return", .{});
+        }
 
         if (self.expected_return_type) |expected| {
             if (!self.isCompatible(return_type, expected)) {
@@ -371,22 +412,66 @@ pub const TypeChecker = struct {
         };
     }
 
+    // Branch-level pending fallible tracking.
+    //
+    // Both branches of an if/else must consume the same !T bindings.
+    // An if without else must not consume any, since the "no-else" path
+    // leaves them unconsumed.
+    //
+    // Example — partial consumption is rejected:
+    //
+    //   const result = fallible();       // pending = { "result" }
+    //   if (cond) { try result; }        // then consumes "result" → pending = {}
+    //                                    // no else → else pending = { "result" }
+    //                                    // mismatch → ERROR
+    //
+    // Example — both branches consume → OK:
+    //
+    //   const result = fallible();       // pending = { "result" }
+    //   if (cond) { try result; }        // then pending = {}
+    //   else      { try result; }        // else pending = {}
+    //                                    // match → pending = {}
+    //
     fn checkIf(self: *TypeChecker, if_expr: *ast.Expression.If) !SymbolInfo {
         const condition_type = try asPipeType(try self.checkExpression(if_expr.condition));
         if (condition_type != .bool) {
             return self.fail(error.TypeMismatch, "Type mismatch: if condition must be Bool, got {s}", .{@tagName(condition_type)});
         }
 
+        // Snapshot pending set before either branch runs
+        const pending_snapshot = try self.pending_fallibles.clone();
+
+        // Check then-branch — may mutate pending_fallibles via try/catch
         const then_type = try asPipeType(try self.checkExpression(if_expr.then_branch));
+        var return_type: PipeType = .unit;
+
+        const after_then_pending = try self.pending_fallibles.clone();
+
+        // Default: no else means else-branch leaves pending unchanged (= snapshot)
+        var after_else_pending = pending_snapshot;
+
+        // Restore snapshot so else-branch starts from the same baseline
+        self.pending_fallibles = pending_snapshot;
         if (if_expr.else_branch) |else_branch| {
             const else_type = try asPipeType(try self.checkExpression(else_branch));
             if (!then_type.compatible(else_type)) {
                 return self.fail(error.TypeMismatch, "Type mismatch: if branches must have same type, got {s} and {s}", .{ @tagName(then_type), @tagName(else_type) });
             }
-            return .{ .variable = .{ .pipe_type = then_type, .mutability = .constant } };
+
+            after_else_pending = try self.pending_fallibles.clone();
+
+            return_type = then_type;
         }
 
-        return .{ .variable = .{ .pipe_type = .unit, .mutability = .constant } };
+        // Both branches must leave the same pending set
+        if (!pendingSetsEqual(after_then_pending, after_else_pending)) {
+            return self.fail(error.UnconsumedFallible, "if branches must consume the same fallible bindings", .{});
+        }
+
+        // Apply the merged result
+        self.pending_fallibles = after_then_pending;
+
+        return .{ .variable = .{ .pipe_type = return_type, .mutability = .constant } };
     }
 
     fn checkVarAssignment(self: *TypeChecker, assign: *ast.Expression.VarAssignment) !SymbolInfo {
@@ -400,6 +485,14 @@ pub const TypeChecker = struct {
             return self.fail(error.ConstReassignment, "Cannot reassign constant '{s}' at line {d}", .{ assign.token.lexeme, assign.token.line });
         }
 
+        // Protect against the following scenario:
+        // var r = foo(); // foo returns !T
+        // r = bar();     // bar returns T
+        // error in r is lost
+        if (self.pending_fallibles.contains(assign.token.lexeme)) {
+            return self.fail(error.UnconsumedFallible, "Reassignment of unconsumed fallible binding '{s}' at line {d}", .{ assign.token.lexeme, assign.token.line });
+        }
+
         const value_type = try asPipeType(try self.checkExpression(assign.value));
         if (!v.pipe_type.compatible(value_type)) {
             return self.fail(error.TypeMismatch, "Type mismatch: expected {s}, got {s} at line {d}", .{
@@ -407,6 +500,11 @@ pub const TypeChecker = struct {
                 @tagName(value_type),
                 assign.token.line,
             });
+        }
+
+        // Track the new assigned fallible binding
+        if (self.isFallible(value_type)) {
+            try self.pending_fallibles.put(assign.token.lexeme, {});
         }
 
         return .{ .variable = .{ .pipe_type = v.pipe_type, .mutability = v.mutability } };
@@ -504,7 +602,7 @@ pub const TypeChecker = struct {
 
     fn checkTry(self: *TypeChecker, try_expr: *ast.Expression.Try) !SymbolInfo {
         const inner = try asPipeType(try self.checkExpression(try_expr.expression));
-        //
+
         // Check that the expression is a result enum (synthesized E!T type)
         if (!self.isFallible(inner)) {
             return self.fail(error.TypeMismatch, "Type mismatch: 'try' applied to non-fallible expression at line {d}", .{try_expr.token.line});
@@ -512,6 +610,10 @@ pub const TypeChecker = struct {
 
         if (!self.in_fallible_fn) {
             return self.fail(error.TypeMismatch, "Type mismatch: 'try' used outside a fallible function at line {d}", .{try_expr.token.line});
+        }
+
+        if (try_expr.expression == .variable) {
+            _ = self.pending_fallibles.remove(try_expr.expression.variable.token.lexeme);
         }
 
         // Unwrap the OK variant or propagate the error upwards
@@ -546,6 +648,12 @@ pub const TypeChecker = struct {
             try inner_env.define(binding.lexeme, .{ .variable = .{ .pipe_type = err_type, .mutability = .constant } });
 
             self.env = inner_env;
+        }
+
+        // Remove the fallible expression *before* checking the handler.
+        // It shouldn't see result as pending, catch is the consumption point
+        if (catch_expr.expression == .variable) {
+            _ = self.pending_fallibles.remove(catch_expr.expression.variable.token.lexeme);
         }
 
         _ = try self.checkExpression(catch_expr.handler);
@@ -773,5 +881,21 @@ pub const TypeChecker = struct {
             .struct_type => |name| name,
             .enum_type => |name| name,
         };
+    }
+
+    // Returns true if the two sets of pending errors are equal
+    fn pendingSetsEqual(a: std.StringHashMap(void), b: std.StringHashMap(void)) bool {
+        if (a.count() != b.count()) {
+            return false;
+        }
+
+        var it = a.keyIterator();
+        while (it.next()) |name| {
+            if (!b.contains(name.*)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 };

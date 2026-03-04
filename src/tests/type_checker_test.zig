@@ -14,6 +14,13 @@ fn expectTypeError(source: []const u8) !void {
     try std.testing.expectError(error.TypeMismatch, result);
 }
 
+fn expectUnconsumedFallibleError(source: []const u8) !void {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const result = helpers.typeCheck(source, arena.allocator());
+    try std.testing.expectError(error.UnconsumedFallible, result);
+}
+
 fn expectConstError(source: []const u8) !void {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -240,5 +247,114 @@ test "enum composition wrong type rejected" {
         \\enum StaffRole { Admin, }
         \\enum AnyRole { StaffRole, Guest, }
         \\const r: AnyRole = 42;
+    );
+}
+
+// -- !T linearity
+
+test "discarding !T result is a compile error" {
+    try expectUnconsumedFallibleError(
+        \\error enum E { Fail }
+        \\fn fallible() E!Int { 1; }
+        \\fn main() { fallible(); }
+    );
+}
+
+test "unconsumed !T binding is a compile error" {
+    try expectUnconsumedFallibleError(
+        \\error enum E { Fail }
+        \\fn fallible() E!Int { 1; }
+        \\fn main() { const result = fallible(); }
+    );
+}
+
+test "consumed !T binding via try is allowed" {
+    try expectTypeCheck(
+        \\error enum E { Fail }
+        \\fn fallible() E!Int { 1; }
+        \\fn main() E!Int { const result = fallible(); try result; }
+    );
+}
+
+test "consumed !T binding via catch is allowed" {
+    try expectTypeCheck(
+        \\error enum E { Fail }
+        \\fn fallible() E!Int { 1; }
+        \\fn main() Int { const result = fallible(); result catch { -1; }; }
+    );
+}
+
+test "explicit discard of !T is allowed" {
+    try expectTypeCheck(
+        \\error enum E { Fail }
+        \\fn fallible() E!Int { 1; }
+        \\fn main() { const _ = fallible(); }
+    );
+}
+
+test "reassigning unconsumed !T var is a compile error" {
+    try expectUnconsumedFallibleError(
+        \\error enum E { Fail }
+        \\fn f1() E!Int { 1; }
+        \\fn f2() E!Int { 2; }
+        \\fn main() E!Int { var result = f1(); result = f2(); try result; }
+    );
+}
+
+test "reassigning consumed !T var is allowed" {
+    try expectTypeCheck(
+        \\error enum E { Fail }
+        \\fn f1() E!Int { 1; }
+        \\fn f2() E!Int { 2; }
+        \\fn main() E!Int { var result = f1(); try result; result = f2(); try result; }
+    );
+}
+
+test "return with unconsumed !T binding is a compile error" {
+    try expectUnconsumedFallibleError(
+        \\error enum E { Fail }
+        \\fn fallible() E!Int { 1; }
+        \\fn main() Int { const result = fallible(); return 42; }
+    );
+}
+
+test "returning a !T binding consumes it" {
+    try expectTypeCheck(
+        \\error enum E { Fail }
+        \\fn fallible() E!Int { 1; }
+        \\fn main() E!Int { const result = fallible(); return result; }
+    );
+}
+
+test "if branches must consume same !T bindings" {
+    try expectUnconsumedFallibleError(
+        \\error enum E { Fail }
+        \\fn fallible() E!Int { 1; }
+        \\fn main() E!Int {
+        \\    const result = fallible();
+        \\    if (true) { try result; } else { 0; }
+        \\}
+        );
+        }
+
+        test "if both branches consume !T is allowed" {
+        try expectTypeCheck(
+            \\error enum E { Fail }
+            \\fn fallible() E!Int { 1; }
+            \\fn main() E!Int {
+            \\    const result = fallible();
+            \\    if (true) { try result; } else { try result; }
+            \\}
+        );
+        }
+
+        test "if without else must not consume !T" {
+        try expectUnconsumedFallibleError(
+            \\error enum E { Fail }
+            \\fn fallible() E!Int { 1; }
+            \\fn main() E!Int {
+            \\    const result = fallible();
+            \\    if (true) { try result; }
+            \\}
     );
 }
