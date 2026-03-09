@@ -247,6 +247,7 @@ pub const Value = union(enum) {
         }
     }
 
+    // Returns true if the value is truthy
     pub fn isTruthy(self: Value) bool {
         return switch (self) {
             .null, .unit => false,
@@ -255,6 +256,13 @@ pub const Value = union(enum) {
             .function => true,
             .string => |s| s.len > 0,
             .struct_instance => |_| true,
+        };
+    }
+
+    pub fn isNumber(self: Value) bool {
+        return switch (self) {
+            .int => true,
+            else => false,
         };
     }
 

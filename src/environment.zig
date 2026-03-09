@@ -5,24 +5,24 @@ const Value = ast.Value;
 
 pub const Environment = struct {
     enclosing: ?*Environment,
-    values: std.StringHashMap(Value),
+    values: std.StringHashMapUnmanaged(Value),
     allocator: std.mem.Allocator,
 
     pub fn init(enclosing: ?*Environment, allocator: std.mem.Allocator) Environment {
         return .{
             .enclosing = enclosing,
-            .values = std.StringHashMap(Value).init(allocator),
+            .values = .{},
             .allocator = allocator,
         };
     }
 
     pub fn deinit(self: *Environment) void {
-        self.values.deinit();
+        self.values.deinit(self.allocator);
     }
 
     // Creates a new binding in the current scope; errors if the name is already defined here.
     pub fn define(self: *Environment, name: []const u8, value: Value) !void {
-        const gop = try self.values.getOrPut(name);
+        const gop = try self.values.getOrPut(self.allocator, name);
         if (gop.found_existing) {
             return error.VariableAlreadyDefined;
         }
@@ -44,7 +44,7 @@ pub const Environment = struct {
     // Mutates an existing binding anywhere in the scope chain; errors if not found anywhere.
     pub fn assign(self: *Environment, name: []const u8, value: Value) !void {
         if (self.values.contains(name)) {
-            try self.values.put(name, value);
+            try self.values.put(self.allocator, name, value);
             return;
         }
 

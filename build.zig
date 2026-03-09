@@ -212,6 +212,17 @@ pub fn build(b: *std.Build) void {
     });
     const run_bytecode_disassemble_tests = b.addRunArtifact(bytecode_disassemble_tests);
 
+    const bytecode_vm_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/tests/bytecode_vm_test.zig"),
+            .target = target,
+            .imports = &.{
+                .{ .name = "pipe", .module = mod },
+            },
+        }),
+    });
+    const run_bytecode_vm_tests = b.addRunArtifact(bytecode_vm_tests);
+
     // A top level step for running all tests. dependOn can be called multiple
     // times and since the two run steps do not depend on one another, this will
     // make the two of them run in parallel.
@@ -224,6 +235,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_type_checker_tests.step);
     test_step.dependOn(&run_bytecode_chunk_tests.step);
     test_step.dependOn(&run_bytecode_disassemble_tests.step);
+    test_step.dependOn(&run_bytecode_vm_tests.step);
 
     // Just like flags, top level steps are also listed in the `--help` menu.
     //

@@ -32,7 +32,7 @@ pub const Interpreter = struct {
     env: *Environment,
     // Set of declared enum type names; used to detect when a zero-field variant references
     // an existing enum (nested enum coercion at runtime)
-    known_enum_names: std.StringHashMap(void),
+    known_enum_names: std.StringHashMapUnmanaged(void),
     ctx: RuntimeContext,
     return_value: ?Value = null,
     method_receiver: ?Value = null,
@@ -45,7 +45,7 @@ pub const Interpreter = struct {
 
         return .{
             .env = env,
-            .known_enum_names = std.StringHashMap(void).init(allocator),
+            .known_enum_names = .{},
             .ctx = ctx,
             .allocator = allocator,
         };
@@ -178,7 +178,7 @@ pub const Interpreter = struct {
         }
 
         // Don't forget to add the enum to our known enum names
-        try self.known_enum_names.put(decl.name.lexeme, {});
+        try self.known_enum_names.put(self.allocator, decl.name.lexeme, {});
     }
 
     // NOTE: -- Expressions

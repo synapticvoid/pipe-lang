@@ -35,19 +35,19 @@ const TypeCheckError = error{
 
 pub const TypeEnvironment = struct {
     enclosing: ?*TypeEnvironment,
-    symbols: std.StringHashMap(SymbolInfo),
+    symbols: std.StringHashMapUnmanaged(SymbolInfo),
     allocator: std.mem.Allocator,
 
     pub fn init(enclosing: ?*TypeEnvironment, allocator: std.mem.Allocator) TypeEnvironment {
         return .{
             .enclosing = enclosing,
-            .symbols = std.StringHashMap(SymbolInfo).init(allocator),
+            .symbols = .{},
             .allocator = allocator,
         };
     }
 
     pub fn define(self: *TypeEnvironment, name: []const u8, info: SymbolInfo) !void {
-        try self.symbols.put(name, info);
+        try self.symbols.put(self.allocator, name, info);
     }
 
     pub fn get(self: *TypeEnvironment, name: []const u8) !SymbolInfo {
@@ -75,17 +75,17 @@ pub const TypeChecker = struct {
 
     // Lookup table to match error uses to error declarations
     // name -> error variant identifier
-    error_sets: std.StringHashMap([]const []const u8),
+    error_sets: std.StringHashMapUnmanaged([]const []const u8),
 
     // Lookup table to match struct types
     // name -> struct/union type
-    type_registry: std.StringHashMap(types.TypeDef),
+    type_registry: std.StringHashMapUnmanaged(types.TypeDef),
 
     // Last type checker error message
     last_error: ?[]const u8 = null,
 
     // Tracks unconsumed !T bindinds by name
-    pending_fallibles: std.StringHashMap(void),
+    pending_fallibles: std.StringHashMapUnmanaged(void),
 
     allocator: std.mem.Allocator,
 
@@ -98,9 +98,9 @@ pub const TypeChecker = struct {
 
         return .{
             .env = env,
-            .error_sets = std.StringHashMap([]const []const u8).init(allocator),
-            .type_registry = std.StringHashMap(types.TypeDef).init(allocator),
-            .pending_fallibles = std.StringHashMap(void).init(allocator),
+            .error_sets = .{},
+            .type_registry = .{},
+            .pending_fallibles = .{},
             .allocator = allocator,
         };
     }
@@ -180,7 +180,7 @@ pub const TypeChecker = struct {
             // If the resolved_type is !T, track it to check
             // if it's consumed on scope exit
             if (!std.mem.eql(u8, decl.name.lexeme, "_")) {
-                try self.pending_fallibles.put(decl.name.lexeme, {});
+                try self.pending_fallibles.put(self.allocator, decl.name.lexeme, {});
             }
         }
 
@@ -237,7 +237,7 @@ pub const TypeChecker = struct {
 
         // Save and reset pending fallibles for this scope
         const previous_pending = self.pending_fallibles;
-        self.pending_fallibles = std.StringHashMap(void).init(self.allocator);
+        self.pending_fallibles = .{};
         defer self.pending_fallibles = previous_pending;
 
         // Check the body
@@ -294,7 +294,7 @@ pub const TypeChecker = struct {
         }
 
         // Declare the struct in the registry
-        try self.type_registry.put(decl.name.lexeme, .{ .struct_type = .{
+        try self.type_registry.put(self.allocator, decl.name.lexeme, .{ .struct_type = .{
             .fields = resolved_fields,
             .body_fields = resolved_body_fields,
             .kind = decl.kind,
@@ -373,7 +373,7 @@ pub const TypeChecker = struct {
             };
         }
 
-        try self.type_registry.put(decl.name.lexeme, .{ .enum_type = .{
+        try self.type_registry.put(self.allocator, decl.name.lexeme, .{ .enum_type = .{
             .is_error = decl.is_error,
             .is_result = false,
             .variants = resolved_variants,
@@ -507,13 +507,13 @@ pub const TypeChecker = struct {
         }
 
         // Snapshot pending set before either branch runs
-        const pending_snapshot = try self.pending_fallibles.clone();
+        const pending_snapshot = try self.pending_fallibles.clone(self.allocator);
 
         // Check then-branch — may mutate pending_fallibles via try/catch
         const then_type = try asPipeType(try self.checkExpression(if_expr.then_branch));
         var return_type: PipeType = .unit;
 
-        const after_then_pending = try self.pending_fallibles.clone();
+        const after_then_pending = try self.pending_fallibles.clone(self.allocator);
 
         // Default: no else means else-branch leaves pending unchanged (= snapshot)
         var after_else_pending = pending_snapshot;
@@ -526,7 +526,7 @@ pub const TypeChecker = struct {
                 return self.fail(error.TypeMismatch, "Type mismatch: if branches must have same type, got {s} and {s}", .{ @tagName(then_type), @tagName(else_type) });
             }
 
-            after_else_pending = try self.pending_fallibles.clone();
+            after_else_pending = try self.pending_fallibles.clone(self.allocator);
 
             return_type = then_type;
         }
@@ -572,7 +572,7 @@ pub const TypeChecker = struct {
 
         // Track the new assigned fallible binding
         if (self.isFallible(value_type)) {
-            try self.pending_fallibles.put(assign.token.lexeme, {});
+            try self.pending_fallibles.put(self.allocator, assign.token.lexeme, {});
         }
 
         return .{ .variable = .{ .pipe_type = v.pipe_type, .mutability = v.mutability } };
@@ -897,7 +897,7 @@ pub const TypeChecker = struct {
                 variants[1] = .{ .name = types.RESULT_ERR_VARIANT, .fields = err_fields };
 
                 // Register and return
-                try self.type_registry.put(name, .{ .enum_type = .{
+                try self.type_registry.put(self.allocator, name, .{ .enum_type = .{
                     .is_error = false,
                     .is_result = true,
                     .variants = variants,
@@ -1029,7 +1029,7 @@ pub const TypeChecker = struct {
     }
 
     // Returns true if the two sets of pending errors are equal
-    fn pendingSetsEqual(a: std.StringHashMap(void), b: std.StringHashMap(void)) bool {
+    fn pendingSetsEqual(a: std.StringHashMapUnmanaged(void), b: std.StringHashMapUnmanaged(void)) bool {
         if (a.count() != b.count()) {
             return false;
         }
