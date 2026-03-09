@@ -99,10 +99,29 @@ pub const Expression = union(enum) {
     field_access: *FieldAccess,
     field_assignment: *FieldAssignment,
 
+    pub fn line(self: Expression) u32 {
+        return switch (self) {
+            .literal => |l| l.token.line,
+            .variable => |v| v.token.line,
+            .var_assignment => |a| a.token.line,
+            .fn_call => |c| c.callee.line(),
+            .unary => |u| u.operator.line,
+            .binary => |b| b.operator.line,
+            .if_expr => |i| i.condition.line(),
+            .block => |b| if (b.statements.len > 0) statementLine(b.statements[0]) else 0,
+            .try_expr => |t| t.token.line,
+            .catch_expr => |c| c.token.line,
+            .struct_init => |s| s.name.line,
+            .field_access => |f| f.name.line,
+            .field_assignment => |f| f.name.line,
+        };
+    }
+
     // -------------------------------------------------------------------
 
     // Literals
     pub const Literal = struct {
+        token: Token,
         value: Value,
     };
 
@@ -313,6 +332,17 @@ pub const StructKind = enum {
     plain,
     case,
 };
+
+fn statementLine(stmt: Statement) u32 {
+    return switch (stmt) {
+        .expression => |e| e.line(),
+        .var_declaration => |d| d.name.line,
+        .fn_declaration => |d| d.name.line,
+        .@"return" => |r| r.token.line,
+        .struct_declaration => |d| d.name.line,
+        .enum_declaration => |d| d.name.line,
+    };
+}
 
 pub const PipeTypeAnnotation = union(enum) {
     named: Token, // e.g. `Int`, `MyEnum`

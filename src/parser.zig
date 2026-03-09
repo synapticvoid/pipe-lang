@@ -459,24 +459,26 @@ pub const Parser = struct {
             // Literals
             .int => {
                 _ = self.advance();
-                const value = std.fmt.parseInt(i64, self.previous().lexeme, 10) catch return error.InvalidCharacter;
-                return ast.Expression{ .literal = .{ .value = .{ .int = value } } };
+                const tok = self.previous();
+                const value = std.fmt.parseInt(i64, tok.lexeme, 10) catch return error.InvalidCharacter;
+                return ast.Expression{ .literal = .{ .token = tok, .value = .{ .int = value } } };
             },
             .string => {
                 _ = self.advance();
-                return ast.Expression{ .literal = .{ .value = .{ .string = self.previous().lexeme } } };
+                const tok = self.previous();
+                return ast.Expression{ .literal = .{ .token = tok, .value = .{ .string = tok.lexeme } } };
             },
             .true => {
                 _ = self.advance();
-                return ast.Expression{ .literal = .{ .value = .{ .boolean = true } } };
+                return ast.Expression{ .literal = .{ .token = self.previous(), .value = .{ .boolean = true } } };
             },
             .false => {
                 _ = self.advance();
-                return ast.Expression{ .literal = .{ .value = .{ .boolean = false } } };
+                return ast.Expression{ .literal = .{ .token = self.previous(), .value = .{ .boolean = false } } };
             },
             .null => {
                 _ = self.advance();
-                return ast.Expression{ .literal = .{ .value = .null } };
+                return ast.Expression{ .literal = .{ .token = self.previous(), .value = .null } };
             },
 
             // Variables

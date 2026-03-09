@@ -45,6 +45,7 @@ pub const Chunk = struct {
         try self.writeByte(@truncate(value), line); // low bytes
     }
 
+    // Add the constant to the pool and return its index
     pub fn addConstant(self: *Chunk, value: Value) !u16 {
         if (self.constants.items.len >= std.math.maxInt(u16)) {
             return error.TooManyConstants;
