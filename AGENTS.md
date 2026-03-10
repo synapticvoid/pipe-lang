@@ -1,6 +1,6 @@
 # Pipe Lang
 
-Toy language implementation, ported from Python to Zig 0.15.2 as a learning exercise.
+Language implementation in Zig 0.15.2.
 - GitHub: https://github.com/synapticvoid/pipe-lang (owner: synapticvoid, repo: pipe-lang)
 
 ## Project structure
@@ -8,6 +8,10 @@ Toy language implementation, ported from Python to Zig 0.15.2 as a learning exer
 - `src/tokens.zig` — Token types and keyword lookup
 - `src/lexer.zig` — Lexer/tokenizer
 - `src/main.zig` — Entry point
+
+## GitHub
+
+- Use `gh` CLI for all GitHub interactions
 
 ## Workflow
 
