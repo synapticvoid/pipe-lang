@@ -71,7 +71,7 @@ test "parse case struct declaration" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    const result = try helpers.parse("case struct User(const id: Int, const name: String);", allocator);
+    const result = try helpers.parse("case struct User(const id: Int, const name: Str);", allocator);
 
     const decl = result[0].struct_declaration;
     try std.testing.expectEqualStrings("User", decl.name.lexeme);
@@ -109,7 +109,7 @@ test "parse enum declaration - variant with fields" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    const result = try helpers.parse("enum Role { Admin, Member(const team: String), Guest, }", allocator);
+    const result = try helpers.parse("enum Role { Admin, Member(const team: Str), Guest, }", allocator);
 
     const decl = result[0].enum_declaration;
     try std.testing.expectEqualStrings("Role", decl.name.lexeme);

@@ -8,7 +8,9 @@
       "Bash(git:*)",
       "WebSearch",
       "mcp__github__list_issues",
-      "Bash(gh issue:*)"
+      "Bash(gh issue:*)",
+      "Bash(gh api:*)",
+      "Bash(gh label:*)"
     ]
   }
 }

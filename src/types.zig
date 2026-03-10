@@ -7,7 +7,7 @@ pub const SELF_TYPE = "Self";
 pub const RESULT_OK_VARIANT = "Ok";
 pub const RESULT_ERR_VARIANT = "Err";
 pub const METHOD_EQUALS = "equals";
-pub const METHOD_TO_STRING = "toString";
+pub const METHOD_TO_STRING = "to_str";
 
 pub const PipeType = union(enum) {
     int,

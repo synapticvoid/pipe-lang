@@ -39,7 +39,7 @@ const s = #{1, 2, 3}               # inferred as Set[Int]
 ### Method syntax
 
 ```pipe
-xs.len()                            # -> Int
+xs.size()                            # -> Int
 xs.contains(value)                  # -> Bool
 xs.get(index)                       # -> IndexError!T   (List, error on out-of-bounds)
 xs.get(index, default)              # -> T              (List, returns default)
@@ -68,7 +68,7 @@ s.difference(other)                 # -> Set[T]
 An ordered, indexable sequence of values of type `T`. Preserves insertion order.
 Index access is zero-based.
 
-Negative indexing is supported: `xs[-1]` is equivalent to `xs[xs.len() - 1]`.
+Negative indexing is supported: `xs[-1]` is equivalent to `xs[xs.size() - 1]`.
 Negative out-of-bounds is `IndexError`, same as positive out-of-bounds.
 
 ### `Map[K, V]`
@@ -94,7 +94,7 @@ Method calls on collection values desugar to builtin calls:
 
 | Method form         | Desugars to          |
 |---------------------|----------------------|
-| `xs.len()`          | `len(xs)`            |
+| `xs.size()`          | `len(xs)`            |
 | `xs.contains(v)`    | `contains(xs, v)`    |
 | `xs.get(i)`         | `get(xs, i)`         |
 | `xs.get(i, d)`      | `get(xs, i, d)`      |
@@ -135,7 +135,7 @@ A type `T` is hashable if:
 - It is a built-in primitive (`Int`, `Str`, `Bool`, `Float`), or
 - It defines a `hash() -> Int` method
 
-This mirrors the existing `toString()` convention: built-in implementations
+This mirrors the existing `to_str()` convention: built-in implementations
 exist for primitives; structs opt in by defining `hash()`.
 
 Equality (`==`) is always defined for all types:

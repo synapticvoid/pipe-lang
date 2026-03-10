@@ -148,36 +148,36 @@ test "catch on non-fallible expression is rejected" {
 // -- Structs
 
 test "struct declaration is valid" {
-    try expectTypeCheck("struct Session(const token: String);");
-    try expectTypeCheck("case struct User(const id: Int, const name: String);");
+    try expectTypeCheck("struct Session(const token: Str);");
+    try expectTypeCheck("case struct User(const id: Int, const name: Str);");
 }
 
 test "struct construction type checks" {
     try expectTypeCheck(
-        \\case struct User(const id: Int, const name: String);
+        \\case struct User(const id: Int, const name: Str);
         \\const u = User(1, "Alice");
     );
 }
 
 test "struct construction wrong arg count rejected" {
     try expectTypeError(
-        \\case struct User(const id: Int, const name: String);
+        \\case struct User(const id: Int, const name: Str);
         \\const u = User(1);
     );
 }
 
 test "struct construction wrong arg type rejected" {
     try expectTypeError(
-        \\case struct User(const id: Int, const name: String);
+        \\case struct User(const id: Int, const name: Str);
         \\const u = User("wrong", "Alice");
     );
 }
 
 test "struct field access type checks" {
     try expectTypeCheck(
-        \\case struct User(const id: Int, const name: String);
+        \\case struct User(const id: Int, const name: Str);
         \\const u = User(1, "Alice");
-        \\const n: String = u.name;
+        \\const n: Str = u.name;
     );
 }
 
@@ -195,7 +195,7 @@ test "struct field access unknown field rejected" {
 test "struct used as field type" {
     try expectTypeCheck(
         \\case struct User(const id: Int);
-        \\struct Session(const user: User, var token: String);
+        \\struct Session(const user: User, var token: Str);
     );
 }
 
@@ -222,7 +222,7 @@ test "struct static method call" {
 
 test "field assignment to var field type checks" {
     try expectTypeCheck(
-        \\case struct User(const id: Int, var name: String);
+        \\case struct User(const id: Int, var name: Str);
         \\var u = User(1, "Alice");
         \\u.name = "Bob";
     );
@@ -230,7 +230,7 @@ test "field assignment to var field type checks" {
 
 test "field assignment to const field rejected" {
     try expectConstError(
-        \\case struct User(const id: Int, var name: String);
+        \\case struct User(const id: Int, var name: Str);
         \\var u = User(1, "Alice");
         \\u.id = 2;
     );
@@ -239,41 +239,41 @@ test "field assignment to const field rejected" {
 // -- Enums
 
 test "enum declaration is valid" {
-    try expectTypeCheck("enum Role { Admin, Member(const team: String), Guest, }");
+    try expectTypeCheck("enum Role { Admin, Member(const team: Str), Guest, }");
 }
 
 test "enum variant construction type checks" {
     try expectTypeCheck(
-        \\enum Role { Admin, Member(const team: String), Guest, }
+        \\enum Role { Admin, Member(const team: Str), Guest, }
         \\const r = Role.Member("eng");
     );
 }
 
 test "enum variant construction wrong arg count rejected" {
     try expectTypeError(
-        \\enum Role { Admin, Member(const team: String), }
+        \\enum Role { Admin, Member(const team: Str), }
         \\const r = Role.Member("eng", "extra");
     );
 }
 
 test "enum variant construction wrong arg type rejected" {
     try expectTypeError(
-        \\enum Role { Admin, Member(const team: String), }
+        \\enum Role { Admin, Member(const team: Str), }
         \\const r = Role.Member(42);
     );
 }
 
 test "enum variant field access type checks" {
     try expectTypeCheck(
-        \\enum Role { Admin, Member(const team: String), }
+        \\enum Role { Admin, Member(const team: Str), }
         \\const r = Role.Member("eng");
-        \\const t: String = r.team;
+        \\const t: Str = r.team;
     );
 }
 
 test "enum composition declaration and explicit construction type checks" {
     try expectTypeCheck(
-        \\enum StaffRole { Admin, Member(const team: String), }
+        \\enum StaffRole { Admin, Member(const team: Str), }
         \\enum AnyRole { StaffRole, Guest, }
         \\const r = AnyRole.StaffRole(StaffRole.Admin());
     );
@@ -281,7 +281,7 @@ test "enum composition declaration and explicit construction type checks" {
 
 test "enum composition implicit coercion type checks" {
     try expectTypeCheck(
-        \\enum StaffRole { Admin, Member(const team: String), }
+        \\enum StaffRole { Admin, Member(const team: Str), }
         \\enum AnyRole { StaffRole, Guest, }
         \\const r: AnyRole = StaffRole.Admin();
     );

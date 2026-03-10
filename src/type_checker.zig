@@ -835,7 +835,7 @@ pub const TypeChecker = struct {
         .{ "Bool", PipeType.bool },
         .{ "Float", PipeType.float },
         .{ "Int", PipeType.int },
-        .{ "String", PipeType.string },
+        .{ "Str", PipeType.string },
         .{ "Unit", PipeType.unit },
     });
 
@@ -1018,7 +1018,7 @@ pub const TypeChecker = struct {
     fn pipeTypeName(t: PipeType) []const u8 {
         return switch (t) {
             .int => "Int",
-            .string => "String",
+            .string => "Str",
             .bool => "Bool",
             .float => "Float",
             .unit => "Unit",

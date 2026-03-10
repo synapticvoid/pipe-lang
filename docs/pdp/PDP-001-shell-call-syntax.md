@@ -68,8 +68,8 @@ Receives a `Pipeline` via `!>`, executes it as a proper OS-level pipeline
 ## Types
 
 ```pipe
-case struct CommandSpec(program: String, args: List<String>);
-case struct RunResult(code: Int, stdout: String, stderr: String);
+case struct CommandSpec(program: Str, args: List[Str]);
+case struct RunResult(code: Int, stdout: Str, stderr: Str);
 
 error enum CommandError {
     NonZero(const code: Int),

@@ -192,14 +192,14 @@ test "try propagates error out of function" {
 
 test "case struct construction and field access" {
     try expectEval(.{
-        .{ "case struct User(const id: Int, const name: String); const u = User(1, \"Alice\"); u.id;", "1" },
-        .{ "case struct User(const id: Int, const name: String); const u = User(1, \"Alice\"); u.name;", "\"Alice\"" },
+        .{ "case struct User(const id: Int, const name: Str); const u = User(1, \"Alice\"); u.id;", "1" },
+        .{ "case struct User(const id: Int, const name: Str); const u = User(1, \"Alice\"); u.name;", "\"Alice\"" },
     });
 }
 
 test "case struct formatting" {
     try expectEval(.{
-        .{ "case struct User(const id: Int, const name: String); User(1, \"Alice\");", "User(id=1, name=\"Alice\")" },
+        .{ "case struct User(const id: Int, const name: Str); User(1, \"Alice\");", "User(id=1, name=\"Alice\")" },
     });
 }
 
@@ -213,7 +213,7 @@ test "case struct equality is structural" {
 
 test "plain struct formatting" {
     try expectEval(.{
-        .{ "struct Session(const token: String); Session(\"abc\");", "<Session>" },
+        .{ "struct Session(const token: Str); Session(\"abc\");", "<Session>" },
     });
 }
 
@@ -239,7 +239,7 @@ test "struct passed to function" {
 test "struct field assignment" {
     try expectEval(.{
         .{
-            \\case struct User(const id: Int, var name: String);
+            \\case struct User(const id: Int, var name: Str);
             \\var u = User(1, "Alice");
             \\u.name = "Bob";
             \\u.name;
@@ -253,7 +253,7 @@ test "struct body field with default" {
     try expectEval(.{
         .{
             \\case struct User(const id: Int) {
-            \\    const tag: String = "user";
+            \\    const tag: Str = "user";
             \\}
             \\const u = User(1);
             \\u.tag;
@@ -263,11 +263,11 @@ test "struct body field with default" {
     });
 }
 
-test "struct body field excluded from toString" {
+test "struct body field excluded from to_str" {
     try expectOutput(.{
         .{
             \\case struct User(const id: Int) {
-            \\    const tag: String = "user";
+            \\    const tag: Str = "user";
             \\}
             \\print(User(1));
             ,
@@ -280,7 +280,7 @@ test "struct body field excluded from equals" {
     try expectEval(.{
         .{
             \\case struct User(const id: Int) {
-            \\    var tag: String = "a";
+            \\    var tag: Str = "a";
             \\}
             \\const a = User(1);
             \\const b = User(1);
@@ -293,16 +293,16 @@ test "struct body field excluded from equals" {
 
 test "struct print" {
     try expectOutput(.{
-        .{ "case struct User(const id: Int, const name: String); print(User(1, \"Alice\"));", "User(id=1, name=\"Alice\")\n" },
-        .{ "struct Session(const token: String); print(Session(\"abc\"));", "<Session>\n" },
+        .{ "case struct User(const id: Int, const name: Str); print(User(1, \"Alice\"));", "User(id=1, name=\"Alice\")\n" },
+        .{ "struct Session(const token: Str); print(Session(\"abc\"));", "<Session>\n" },
     });
 }
 
-test "struct toString override" {
+test "struct to_str override" {
     try expectOutput(.{
         .{
-            \\case struct User(const id: Int, const name: String) {
-            \\    fn toString(self: Self) String { self.name; }
+            \\case struct User(const id: Int, const name: Str) {
+            \\    fn to_str(self: Self) Str { self.name; }
             \\}
             \\print(User(1, "Alice"));
             ,
@@ -343,7 +343,7 @@ test "struct static method call" {
 test "struct equals override" {
     try expectEval(.{
         .{
-            \\case struct User(const id: Int, const name: String) {
+            \\case struct User(const id: Int, const name: Str) {
             \\    fn equals(self: Self, other: Self) Bool { self.id == other.id; }
             \\}
             \\const a = User(1, "Alice");
@@ -353,7 +353,7 @@ test "struct equals override" {
             "true",
         },
         .{
-            \\case struct User(const id: Int, const name: String) {
+            \\case struct User(const id: Int, const name: Str) {
             \\    fn equals(self: Self, other: Self) Bool { self.id == other.id; }
             \\}
             \\User(1, "Alice") == User(2, "Alice");
@@ -361,7 +361,7 @@ test "struct equals override" {
             "false",
         },
         .{
-            \\case struct User(const id: Int, const name: String) {
+            \\case struct User(const id: Int, const name: Str) {
             \\    fn equals(self: Self, other: Self) Bool { self.id == other.id; }
             \\}
             \\User(1, "Alice") != User(1, "Bob");
@@ -381,30 +381,30 @@ test "enum no-payload variant construction" {
 
 test "enum variant with field construction and access" {
     try expectEval(.{
-        .{ "enum Role { Admin, Member(const team: String), Guest, } const r = Role.Member(\"eng\"); r.team;", "\"eng\"" },
+        .{ "enum Role { Admin, Member(const team: Str), Guest, } const r = Role.Member(\"eng\"); r.team;", "\"eng\"" },
     });
 }
 
 test "enum variant print" {
     try expectOutput(.{
-        .{ "enum Role { Admin, Member(const team: String), } print(Role.Admin());", "Role.Admin()\n" },
-        .{ "enum Role { Admin, Member(const team: String), } print(Role.Member(\"eng\"));", "Role.Member(team=\"eng\")\n" },
+        .{ "enum Role { Admin, Member(const team: Str), } print(Role.Admin());", "Role.Admin()\n" },
+        .{ "enum Role { Admin, Member(const team: Str), } print(Role.Member(\"eng\"));", "Role.Member(team=\"eng\")\n" },
     });
 }
 
 test "enum equality is structural" {
     try expectEval(.{
-        .{ "enum Role { Admin, Member(const team: String), } Role.Admin() == Role.Admin();", "true" },
-        .{ "enum Role { Admin, Member(const team: String), } Role.Member(\"eng\") == Role.Member(\"eng\");", "true" },
-        .{ "enum Role { Admin, Member(const team: String), } Role.Member(\"eng\") == Role.Member(\"other\");", "false" },
-        .{ "enum Role { Admin, Member(const team: String), } Role.Admin() == Role.Member(\"eng\");", "false" },
+        .{ "enum Role { Admin, Member(const team: Str), } Role.Admin() == Role.Admin();", "true" },
+        .{ "enum Role { Admin, Member(const team: Str), } Role.Member(\"eng\") == Role.Member(\"eng\");", "true" },
+        .{ "enum Role { Admin, Member(const team: Str), } Role.Member(\"eng\") == Role.Member(\"other\");", "false" },
+        .{ "enum Role { Admin, Member(const team: Str), } Role.Admin() == Role.Member(\"eng\");", "false" },
     });
 }
 
 test "enum composition explicit construction" {
     try expectEval(.{
-        .{ "enum StaffRole { Admin, Member(const team: String), } enum AnyRole { StaffRole, Guest, } AnyRole.StaffRole(StaffRole.Admin());", "AnyRole.StaffRole(StaffRole=StaffRole.Admin())" },
-        .{ "enum StaffRole { Admin, Member(const team: String), } enum AnyRole { StaffRole, Guest, } AnyRole.StaffRole(StaffRole.Member(\"eng\"));", "AnyRole.StaffRole(StaffRole=StaffRole.Member(team=\"eng\"))" },
+        .{ "enum StaffRole { Admin, Member(const team: Str), } enum AnyRole { StaffRole, Guest, } AnyRole.StaffRole(StaffRole.Admin());", "AnyRole.StaffRole(StaffRole=StaffRole.Admin())" },
+        .{ "enum StaffRole { Admin, Member(const team: Str), } enum AnyRole { StaffRole, Guest, } AnyRole.StaffRole(StaffRole.Member(\"eng\"));", "AnyRole.StaffRole(StaffRole=StaffRole.Member(team=\"eng\"))" },
     });
 }
 
