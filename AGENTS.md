@@ -9,6 +9,12 @@ Language implementation in Zig 0.15.2.
 - `src/lexer.zig` — Lexer/tokenizer
 - `src/main.zig` — Entry point
 
+## PDPs (Pipe Design Proposals)
+
+Design specs for language features live in `docs/pdp/`, named `PDP-NNN-<slug>.md` (e.g. `docs/pdp/PDP-001-shell-call-syntax.md`). A blank template is at `docs/pdp/TEMPLATE.md`.
+
+When working on a feature tied to a PDP, read the relevant PDP first — it defines the canonical syntax, semantics, and open questions.
+
 ## GitHub
 
 - Use `gh` CLI for all GitHub interactions
