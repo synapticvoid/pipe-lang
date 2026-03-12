@@ -1,13 +1,13 @@
-# PDP-002: Pipe Operators
+# PDP-010: Pipe Operators
 
-**Status:** Draft
+**Status:** Accepted
 **Issues:** #22
 
 ## Summary
 
 Add `|>` and `!>` pipeline operators for left-to-right value threading. `|>`
 forwards plain values, `!>` binds over fallible values and short-circuits on
-error. These operators are the foundation for shell call chaining (PDP-001).
+error. These operators are the foundation for shell call chaining (PDP-011).
 
 ## Syntax
 

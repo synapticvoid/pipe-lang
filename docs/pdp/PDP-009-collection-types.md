@@ -1,4 +1,4 @@
-# PDP-003: Collection Types
+# PDP-009: Collection Types
 
 **Status:** Draft
 **Issues:** #33, #34, #35

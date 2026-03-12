@@ -1,6 +1,6 @@
-# PDP-004: Code Style Conventions
+# PDP-001: Code Style Conventions
 
-**Status:** Draft
+**Status:** Implemented
 **Issues:** #
 
 ## Summary
