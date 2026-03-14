@@ -4,20 +4,47 @@ const Parser = @import("parser.zig").Parser;
 const TypeChecker = @import("type_checker.zig").TypeChecker;
 const Interpreter = @import("interpreter.zig").Interpreter;
 const RuntimeContext = @import("runtime.zig").RuntimeContext;
+const bytecode = @import("bytecode/root.zig");
 
 const max_file_size = 10 * 1024 * 1024; // 10MB, should be plenty enough
 const max_input_size = 1024 * 1024; // 1MB, should be plenty enough
 
-fn run(source: []const u8, ctx: RuntimeContext, allocator: std.mem.Allocator) void {
+fn run(source: []const u8, ctx: RuntimeContext, use_interp: bool, allocator: std.mem.Allocator) void {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    runSource(source, ctx, arena.allocator()) catch |err| switch (err) {
-        error.TypeMismatch, error.ConstReassignment, error.UndefinedVariable, error.UndefinedType => {},
-        else => std.debug.print("Error: {}\n", .{err}),
-    };
+    if (use_interp) {
+        runInterpreter(source, ctx, arena.allocator()) catch |err| switch (err) {
+            error.TypeMismatch, error.ConstReassignment, error.UndefinedVariable, error.UndefinedType => {},
+            else => std.debug.print("Error: {}\n", .{err}),
+        };
+    } else {
+        runVm(source, arena.allocator()) catch |err| {
+            std.debug.print("VM error: {}\n", .{err});
+        };
+    }
 }
-fn runSource(source: []const u8, ctx: RuntimeContext, allocator: std.mem.Allocator) !void {
+
+fn runVm(source: []const u8, allocator: std.mem.Allocator) !void {
+    var lexer = Lexer.init(source, allocator);
+    const tokens = try lexer.tokenize();
+
+    var parser = Parser.init(tokens, allocator);
+    const statements = try parser.parse();
+
+    var chunk = bytecode.Chunk.init(allocator);
+    defer chunk.deinit();
+
+    var compiler = bytecode.Compiler.init(&chunk, allocator);
+    defer compiler.deinit();
+    try compiler.compileStatements(statements);
+
+    var vm = bytecode.Vm.init(allocator);
+    defer vm.deinit();
+    _ = try vm.run(&chunk);
+}
+
+fn runInterpreter(source: []const u8, ctx: RuntimeContext, allocator: std.mem.Allocator) !void {
     var lexer = Lexer.init(source, allocator);
     const tokens = try lexer.tokenize();
 
@@ -39,13 +66,13 @@ fn runSource(source: []const u8, ctx: RuntimeContext, allocator: std.mem.Allocat
     try ctx.writer.flush();
 }
 
-fn runFile(path: []const u8, ctx: RuntimeContext, allocator: std.mem.Allocator) !void {
+fn runFile(path: []const u8, ctx: RuntimeContext, use_interp: bool, allocator: std.mem.Allocator) !void {
     const source = try std.fs.cwd().readFileAlloc(allocator, path, max_file_size);
     defer allocator.free(source);
-    run(source, ctx, allocator);
+    run(source, ctx, use_interp, allocator);
 }
 
-fn repl(ctx: RuntimeContext, allocator: std.mem.Allocator) !void {
+fn repl(ctx: RuntimeContext, use_interp: bool, allocator: std.mem.Allocator) !void {
     const stdout = ctx.writer;
 
     var stdin_buf: [max_input_size]u8 = undefined;
@@ -64,7 +91,7 @@ fn repl(ctx: RuntimeContext, allocator: std.mem.Allocator) !void {
 
         if (std.mem.eql(u8, line, "exit")) break;
 
-        run(line, ctx, allocator);
+        run(line, ctx, use_interp, allocator);
     }
 }
 
@@ -76,9 +103,20 @@ pub fn main() !void {
     const ctx = RuntimeContext{ .writer = &stdout_writer.interface };
 
     const args = try std.process.argsAlloc(allocator);
-    if (args.len > 1) {
-        try runFile(args[1], ctx, allocator);
+
+    var use_interp = false;
+    var file_path: ?[]const u8 = null;
+    for (args[1..]) |arg| {
+        if (std.mem.eql(u8, arg, "--interp")) {
+            use_interp = true;
+        } else {
+            file_path = arg;
+        }
+    }
+
+    if (file_path) |path| {
+        try runFile(path, ctx, use_interp, allocator);
     } else {
-        try repl(ctx, allocator);
+        try repl(ctx, use_interp, allocator);
     }
 }

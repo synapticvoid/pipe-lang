@@ -99,7 +99,7 @@ pub const Expression = union(enum) {
     field_access: *FieldAccess,
     field_assignment: *FieldAssignment,
 
-    pub fn line(self: Expression) u32 {
+    pub fn line(self: Expression) usize {
         return switch (self) {
             .literal => |l| l.token.line,
             .variable => |v| v.token.line,
@@ -333,7 +333,7 @@ pub const StructKind = enum {
     case,
 };
 
-fn statementLine(stmt: Statement) u32 {
+pub fn statementLine(stmt: Statement) usize {
     return switch (stmt) {
         .expression => |e| e.line(),
         .var_declaration => |d| d.name.line,

@@ -11,7 +11,7 @@ pub const Chunk = struct {
     /// Bytecode instruction stream.
     code: std.ArrayList(u8),
     /// Source line for each byte in `code` (parallel array).
-    lines: std.ArrayList(u32),
+    lines: std.ArrayList(usize),
     /// Constant pool referenced by operand indices.
     constants: std.ArrayList(Value),
     allocator: std.mem.Allocator,
@@ -31,16 +31,16 @@ pub const Chunk = struct {
         self.constants.deinit(self.allocator);
     }
 
-    pub fn writeByte(self: *Chunk, byte: u8, line: u32) !void {
+    pub fn writeByte(self: *Chunk, byte: u8, line: usize) !void {
         try self.code.append(self.allocator, byte);
         try self.lines.append(self.allocator, line);
     }
 
-    pub fn writeOp(self: *Chunk, op: OpCode, line: u32) !void {
+    pub fn writeOp(self: *Chunk, op: OpCode, line: usize) !void {
         try self.writeByte(@intFromEnum(op), line);
     }
 
-    pub fn writeU16(self: *Chunk, value: u16, line: u32) !void {
+    pub fn writeU16(self: *Chunk, value: u16, line: usize) !void {
         try self.writeByte(@truncate(value >> 8), line); // high bytes
         try self.writeByte(@truncate(value), line); // low bytes
     }
@@ -55,7 +55,7 @@ pub const Chunk = struct {
         return @intCast(self.constants.items.len - 1);
     }
 
-    pub fn getLine(self: *Chunk, offset: usize) !u32 {
+    pub fn getLine(self: *Chunk, offset: usize) !usize {
         if (offset >= self.lines.items.len) {
             return error.InvalidOffset;
         }

@@ -31,6 +31,43 @@ pub fn typeCheck(source: []const u8, allocator: std.mem.Allocator) !void {
     try type_checker.check(statements);
 }
 
+pub const VmEvalResult = struct {
+    value: pipe.ast.Value,
+
+    pub fn deinit(self: *VmEvalResult) void {
+        _ = self;
+    }
+};
+
+pub fn evaluateVm(source: []const u8, allocator: std.mem.Allocator) !VmEvalResult {
+    const tokens = try tokenize(source, allocator);
+    var parser = pipe.Parser.init(tokens, allocator);
+    const statements = try parser.parse();
+
+    var chunk = pipe.bytecode.Chunk.init(allocator);
+    defer chunk.deinit();
+
+    var compiler = pipe.bytecode.Compiler.init(&chunk, allocator);
+    defer compiler.deinit();
+
+    // Compile all statements, but for the last expression statement
+    // skip the pop so the value remains on the stack for vm.run to return.
+    for (statements, 0..) |stmt, i| {
+        if (i == statements.len - 1 and stmt == .expression) {
+            try compiler.compileExpression(stmt.expression);
+            try compiler.emitReturn(stmt.expression.line());
+        } else {
+            try compiler.compileStatement(stmt);
+        }
+    }
+
+    var vm = pipe.bytecode.Vm.init(allocator);
+    defer vm.deinit();
+    const result = try vm.run(&chunk);
+
+    return .{ .value = result };
+}
+
 pub fn evaluate(source: []const u8, allocator: std.mem.Allocator) !EvalResult {
     const tokens = try tokenize(source, allocator);
     var parser = pipe.Parser.init(tokens, allocator);

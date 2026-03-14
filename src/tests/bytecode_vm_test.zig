@@ -584,7 +584,7 @@ test "jump skips instructions" {
     try chunk.writeU16(c1, 1); // offset 1-2
 
     try chunk.writeOp(.jump, 1); // offset 3
-    try chunk.writeU16(4, 1); // offset 4-5, skip 4 bytes
+    try chunk.writeU16(10, 1); // offset 4-5, jump to absolute offset 10
 
     const c_bad = try chunk.addConstant(.{ .int = 999 });
     try chunk.writeOp(.constant, 1); // offset 6 (skipped)
@@ -610,7 +610,7 @@ test "jump_if_false skips when falsy" {
     try chunk.writeOp(.false, 1); // offset 0
 
     try chunk.writeOp(.jump_if_false, 1); // offset 1
-    try chunk.writeU16(4, 1); // offset 2-3, skip 4 bytes
+    try chunk.writeU16(8, 1); // offset 2-3, jump to absolute offset 8
 
     const c_bad = try chunk.addConstant(.{ .int = 999 });
     try chunk.writeOp(.constant, 1); // offset 4 (skipped)
@@ -627,14 +627,14 @@ test "jump_if_false skips when falsy" {
 }
 
 test "jump_if_false falls through when truthy" {
-    // push true, jump_if_false +4, push 42, return, push 999, return
+    // push true, jump_if_false to offset 8, push 42, return, push 999, return
     var chunk = Chunk.init(std.testing.allocator);
     defer chunk.deinit();
 
     try chunk.writeOp(.true, 1); // offset 0
 
     try chunk.writeOp(.jump_if_false, 1); // offset 1
-    try chunk.writeU16(4, 1); // offset 2-3
+    try chunk.writeU16(8, 1); // offset 2-3, jump to absolute offset 8 (not taken)
 
     const c42 = try chunk.addConstant(.{ .int = 42 });
     try chunk.writeOp(.constant, 1); // offset 4
@@ -774,9 +774,9 @@ test "loop jumps backward" {
     // offset 12: equal
     try chunk.writeOp(.equal, 1);
 
-    // offset 13: jump_if_false +4 → offset 20
+    // offset 13: jump_if_false → absolute offset 20
     try chunk.writeOp(.jump_if_false, 1);
-    try chunk.writeU16(4, 1);
+    try chunk.writeU16(20, 1);
 
     // offset 16: get_local 0 (acc) — this is the "done" path
     try chunk.writeOp(.get_local, 1);
@@ -815,9 +815,9 @@ test "loop jumps backward" {
     try chunk.writeOp(.set_local, 1);
     try chunk.writeU16(1, 1);
 
-    // offset 40: loop 37 → jumps to offset 6 (43 - 37 = 6)
+    // offset 40: loop → jumps to absolute offset 6
     try chunk.writeOp(.loop, 1);
-    try chunk.writeU16(37, 1);
+    try chunk.writeU16(6, 1);
 
     const result = try runChunk(&chunk);
     try std.testing.expect(result.eql(.{ .int = 6 })); // 3 + 2 + 1

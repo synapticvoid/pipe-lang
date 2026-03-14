@@ -140,10 +140,7 @@ pub const Vm = struct {
                     const idx = readU16(chunk, &ip);
                     self.stack.items[idx] = self.stack.getLast();
                 },
-                .jump => {
-                    const offset = readU16(chunk, &ip);
-                    ip += offset;
-                },
+                .jump => ip = readU16(chunk, &ip),
                 .jump_if_false => {
                     // Read offset
                     const offset = readU16(chunk, &ip);
@@ -151,13 +148,10 @@ pub const Vm = struct {
                     // Evalute condition on stack
                     const condition = try self.pop();
                     if (!condition.isTruthy()) {
-                        ip += offset;
+                        ip = offset;
                     }
                 },
-                .loop => {
-                    const offset = readU16(chunk, &ip);
-                    ip -= offset;
-                },
+                .loop => ip = readU16(chunk, &ip),
                 .print => {
                     const val = try self.pop();
                     if (self.output_printer) |writer| {
