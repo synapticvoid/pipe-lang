@@ -219,6 +219,11 @@ pub const Value = union(enum) {
     // if (u1.name == u2.name) { ... } // true
     struct_instance: *StructInstance,
 
+    // Actually *FnObject (from bytecode/function.zig).
+    // opaque pointer to avoid a circular dependency between chunk.zig and ast.zig
+    // The cast is done in only one place: vm.zig
+    vm_object: *anyopaque,
+
     pub const StructInstance = struct {
         type_name: []const u8,
         field_names: []const []const u8,
@@ -240,6 +245,7 @@ pub const Value = union(enum) {
             .string => |a| std.mem.eql(u8, a, other.string),
             .boolean => |a| a == other.boolean,
             .null, .unit => true,
+            .vm_object => |a| a == other.vm_object,
             .struct_instance => |a| {
                 const b = other.struct_instance;
                 if (a.kind == .plain) {
@@ -274,6 +280,7 @@ pub const Value = union(enum) {
             .int => |n| n != 0,
             .function => true,
             .string => |s| s.len > 0,
+            .vm_object => true,
             .struct_instance => |_| true,
         };
     }
@@ -295,6 +302,7 @@ pub const Value = union(enum) {
                 .builtin => |bi| try writer.print("fn<{s}>", .{bi.name}),
                 .struct_constructor => |sc| try writer.print("fn<{s}>", .{sc.name}),
             },
+            .vm_object => try writer.writeAll("fn"),
             .null => try writer.writeAll("null"),
             .unit => try writer.writeAll("unit"),
             .struct_instance => |si_ptr| {

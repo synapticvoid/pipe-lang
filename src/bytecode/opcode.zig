@@ -19,10 +19,10 @@ pub const OpCode = enum(u8) {
     true,
     false,
     null,
+    unit,
 
     // Stack operations
     pop, // Discard top of the stack
-    print, // print top of the stack
 
     // Control flow (u16 operand: jump offset)
     jump,
@@ -38,4 +38,7 @@ pub const OpCode = enum(u8) {
     get_global,
     set_global,
     define_global,
+
+    // Function (u8 operand: arity)
+    call,
 };

@@ -55,11 +55,22 @@ pub fn disassembleInstruction(writer: anytype, chunk: *const Chunk, offset: usiz
         .false,
         .null,
         .pop,
-        .print,
         .@"return",
         => {
             try writer.print("{s}\n", .{@tagName(op)});
             return offset + 1;
+        },
+        // u8 operand (arity)
+        .call => {
+            if (offset + 1 >= chunk.code.items.len) {
+                return error.InvalidOffset;
+            }
+
+            // Read u8, print name + arity
+            const arity = chunk.code.items[offset + 1];
+            try writer.print("{s} {d}\n", .{ @tagName(op), arity });
+
+            return offset + 2;
         },
 
         // u16 operand (pool index)

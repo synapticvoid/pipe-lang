@@ -77,3 +77,28 @@ test "parity: if expressions" {
         "var a = if false { 5; } else { -5; }; a;",
     });
 }
+
+test "parity: function call with return" {
+    try expectParity(.{
+        "fn five() Int { return 5; } five();",
+        "fn add(a: Int, b: Int) Int { return a + b; } add(1, 2);",
+    });
+}
+
+test "parity: nested function calls" {
+    try expectParity(.{
+        "fn double(x: Int) Int { return x * 2; } fn quad(x: Int) Int { return double(double(x)); } quad(3);",
+    });
+}
+
+test "parity: function preserves caller locals" {
+    try expectParity(.{
+        "var a = 10; fn add(x: Int, y: Int) Int { return x + y; } var b = add(3, 5); a + b;",
+    });
+}
+
+test "parity: recursion" {
+    try expectParity(.{
+        "fn fact(n: Int) Int { if n <= 1 { return 1; } else { return n * fact(n - 1); } } fact(5);",
+    });
+}

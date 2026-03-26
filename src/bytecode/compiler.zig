@@ -2,6 +2,7 @@ const std = @import("std");
 const Chunk = @import("chunk.zig").Chunk;
 const ChunkError = @import("chunk.zig").ChunkError;
 const OpCode = @import("opcode.zig").OpCode;
+const FnObject = @import("function.zig").FnObject;
 const ast = @import("../ast.zig");
 const Value = ast.Value;
 
@@ -52,6 +53,8 @@ pub const Compiler = struct {
                 try self.emitOp(OpCode.pop, expr.line());
             },
             .var_declaration => |var_decl| try self.compileVarDeclarationStatement(var_decl),
+            .fn_declaration => |fn_decl| try self.compileFnDeclarationStatement(fn_decl),
+            .@"return" => |ret| try self.compileReturnStatement(ret),
             else => return error.UnsupportedNode,
         }
     }
@@ -61,6 +64,66 @@ pub const Compiler = struct {
             try self.compileExpression(in);
         }
         try self.declareLocal(var_decl.name.lexeme);
+    }
+
+    fn compileFnDeclarationStatement(self: *Compiler, fn_decl: ast.Statement.FnDeclaration) CompileError!void {
+        var fn_obj = try self.allocator.create(FnObject);
+        fn_obj.* = .{
+            .name = fn_decl.name.lexeme,
+            .arity = @intCast(fn_decl.params.len),
+            .chunk = Chunk.init(self.allocator),
+        };
+
+        // Save compiler state
+        const prev_chunk = self.chunk;
+        const prev_locals = self.locals;
+        const prev_scope_depth = self.scope_depth;
+
+        // Switch to the function's chunk
+        self.chunk = &fn_obj.chunk;
+        self.locals = .{};
+        self.scope_depth = 0;
+
+        // Reserve slot 0 for the function itself
+        // Useful for closures, methods, etc.
+        try self.declareLocal(fn_decl.name.lexeme);
+
+        // Declare function params as locals
+        for (fn_decl.params) |param| {
+            try self.declareLocal(param.name.lexeme);
+        }
+
+        // Now, comile the body!
+        try self.compileStatements(fn_decl.body);
+
+        // Implicit return in case the function falls through without an explicit return
+        try self.emitOp(OpCode.@"return", fn_decl.name.line);
+
+        // Restore compiler state
+        self.chunk = prev_chunk;
+        self.locals.deinit(self.allocator);
+        self.locals = prev_locals;
+        self.scope_depth = prev_scope_depth;
+
+        // Emit the fn object into the enclosing chunk
+        try self.emitConstant(.{ .vm_object = @ptrCast(fn_obj) }, fn_decl.name.line);
+
+        // Declare the function name as a local (functions are first-class values)
+        // If we are the the top-level, store as a global
+        if (self.scope_depth == 0) {
+            const name_idx = try self.chunk.addConstant(.{ .string = fn_decl.name.lexeme });
+            try self.emitOp(OpCode.define_global, fn_decl.name.line);
+            try self.emitU16(name_idx, fn_decl.name.line);
+        } else {
+            try self.declareLocal(fn_decl.name.lexeme);
+        }
+    }
+
+    fn compileReturnStatement(self: *Compiler, ret: ast.Statement.Return) CompileError!void {
+        if (ret.value) |value| {
+            try self.compileExpression(value);
+        }
+        try self.emitOp(OpCode.@"return", ret.token.line);
     }
 
     // NOTE: -- Expressions
@@ -74,6 +137,7 @@ pub const Compiler = struct {
             .var_assignment => |v| try self.compileVarAssignement(v),
             .block => |b| try self.compileBlock(b),
             .if_expr => |i| try self.compileIf(i),
+            .fn_call => |f| try self.compileFnCall(f),
             else => return error.UnsupportedNode,
         }
     }
@@ -132,9 +196,14 @@ pub const Compiler = struct {
     }
 
     fn compileVariable(self: *Compiler, variable: ast.Expression.Variable) CompileError!void {
-        const slot = self.resolveLocal(variable.token.lexeme) orelse return error.UndefinedVariable;
-        try self.emitOp(OpCode.get_local, variable.token.line);
-        try self.emitU16(slot, variable.token.line);
+        if (self.resolveLocal(variable.token.lexeme)) |slot| {
+            try self.emitOp(OpCode.get_local, variable.token.line);
+            try self.emitU16(slot, variable.token.line);
+        } else {
+            const idx = try self.chunk.addConstant(.{ .string = variable.token.lexeme });
+            try self.emitOp(OpCode.get_global, variable.token.line);
+            try self.emitU16(idx, variable.token.line);
+        }
     }
 
     fn compileVarAssignement(self: *Compiler, va: *const ast.Expression.VarAssignment) CompileError!void {
@@ -187,10 +256,25 @@ pub const Compiler = struct {
 
         if (if_expr.else_branch) |else_branch| {
             try self.compileExpression(else_branch);
+        } else {
+            try self.emitOp(OpCode.unit, if_expr.condition.line());
         }
 
         // Patch the end_jump, we know it's after the else_branch
         self.patchJump(end_jump);
+    }
+
+    fn compileFnCall(self: *Compiler, fn_call: *const ast.Expression.FnCall) CompileError!void {
+        // Compile the callee and the args
+        try self.compileExpression(fn_call.callee);
+        for (fn_call.args) |arg| {
+            try self.compileExpression(arg);
+        }
+
+        // Emit the call + arity operand
+        const line = fn_call.callee.line();
+        try self.emitOp(OpCode.call, line);
+        try self.emitU8(@intCast(fn_call.args.len), line);
     }
 
     // NOTE: -- Helpers
@@ -201,6 +285,10 @@ pub const Compiler = struct {
 
     fn emitOp(self: *Compiler, op: OpCode, line: usize) CompileError!void {
         try self.chunk.writeOp(op, line);
+    }
+
+    fn emitU8(self: *Compiler, value: u8, line: usize) CompileError!void {
+        try self.chunk.writeByte(value, line);
     }
 
     fn emitU16(self: *Compiler, value: u16, line: usize) CompileError!void {

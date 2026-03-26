@@ -370,24 +370,6 @@ test "comparison type error" {
     try std.testing.expectError(error.TypeError, runChunk(&chunk));
 }
 
-test "print outputs value" {
-    // push 42, print, return null
-    var chunk = Chunk.init(std.testing.allocator);
-    defer chunk.deinit();
-
-    const idx = try chunk.addConstant(.{ .int = 42 });
-    try chunk.writeOp(.constant, 1);
-    try chunk.writeU16(idx, 1);
-    try chunk.writeOp(.print, 1);
-    try chunk.writeOp(.null, 1);
-    try chunk.writeOp(.@"return", 1);
-
-    const out = try runChunkCapturingOutput(&chunk);
-    defer std.testing.allocator.free(out.output);
-
-    try std.testing.expectEqualStrings("42\n", out.output);
-}
-
 test "return with empty stack returns unit" {
     var chunk = Chunk.init(std.testing.allocator);
     defer chunk.deinit();
