@@ -54,6 +54,7 @@ pub fn disassembleInstruction(writer: anytype, chunk: *const Chunk, offset: usiz
         .true,
         .false,
         .null,
+        .unit,
         .pop,
         .@"return",
         => {

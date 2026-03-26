@@ -72,6 +72,7 @@ pub const Vm = struct {
                 .true => try self.push(.{ .boolean = true }),
                 .false => try self.push(.{ .boolean = false }),
                 .null => try self.push(.null),
+                .unit => try self.push(.unit),
                 .pop => _ = try self.pop(),
                 .negate => {
                     const val = try self.pop();
