@@ -1,7 +1,6 @@
 const std = @import("std");
 
-const ast = @import("../ast.zig");
-const Value = ast.Value;
+const Value = @import("value.zig").Value;
 
 pub const Environment = struct {
     enclosing: ?*Environment,

@@ -5,7 +5,7 @@ const OpCode = @import("opcode.zig").OpCode;
 const Program = @import("program.zig").Program;
 const FnObject = @import("program.zig").FnObject;
 const ast = @import("../ast.zig");
-const Value = ast.Value;
+const Value = @import("value.zig").Value;
 
 const Local = struct {
     name: []const u8,
@@ -164,7 +164,8 @@ pub const Compiler = struct {
 
     fn compileLiteral(self: *Compiler, lit: ast.Expression.Literal) CompileError!void {
         switch (lit.value) {
-            .int, .string => try self.emitConstant(lit.value, lit.token.line),
+            .int => |n| try self.emitConstant(.{ .int = n }, lit.token.line),
+            .string => |s| try self.emitConstant(.{ .string = s }, lit.token.line),
             .boolean => |b| switch (b) {
                 true => try self.emitOp(OpCode.true, lit.token.line),
                 false => try self.emitOp(OpCode.false, lit.token.line),

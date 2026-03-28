@@ -13,7 +13,7 @@ pub fn parse(source: []const u8, allocator: std.mem.Allocator) ![]const pipe.ast
 }
 
 pub const EvalResult = struct {
-    value: pipe.ast.Value,
+    value: pipe.interpreter.Value,
     output: []const u8,
     allocating: std.Io.Writer.Allocating,
 
@@ -32,7 +32,7 @@ pub fn typeCheck(source: []const u8, allocator: std.mem.Allocator) !void {
 }
 
 pub const VmEvalResult = struct {
-    value: pipe.ast.Value,
+    value: pipe.vm.Value,
 
     pub fn deinit(self: *VmEvalResult) void {
         _ = self;
@@ -78,7 +78,7 @@ pub fn evaluate(source: []const u8, allocator: std.mem.Allocator) !EvalResult {
     var interpreter = try pipe.interpreter.Interpreter.init(ctx, allocator);
     defer interpreter.deinit();
 
-    var result: pipe.ast.Value = .null;
+    var result: pipe.interpreter.Value = .null;
     for (statements) |statement| {
         switch (statement) {
             .expression => |expr| result = try interpreter.evaluate(expr),

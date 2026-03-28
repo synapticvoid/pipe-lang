@@ -408,7 +408,7 @@ pub const TypeChecker = struct {
             .int => .int,
             .string => .string,
             .null, .unit => .unit,
-            .function, .struct_instance, .vm_function => return error.TypeMismatch,
+
         };
         return .{ .variable = .{ .pipe_type = pipe_type, .mutability = .constant } };
     }

@@ -1,7 +1,7 @@
 const std = @import("std");
 const Chunk = @import("chunk.zig").Chunk;
 const OpCode = @import("opcode.zig").OpCode;
-const Value = @import("../ast.zig").Value;
+const Value = @import("value.zig").Value;
 const FnObject = @import("program.zig").FnObject;
 const Program = @import("program.zig").Program;
 

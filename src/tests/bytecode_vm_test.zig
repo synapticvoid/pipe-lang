@@ -4,7 +4,7 @@ const Chunk = vm_pkg.Chunk;
 const OpCode = vm_pkg.OpCode;
 const Vm = vm_pkg.Vm;
 const Program = vm_pkg.Program;
-const Value = @import("pipe").ast.Value;
+const Value = vm_pkg.Value;
 
 // ---------------------------------------------------------------------------
 // Helpers

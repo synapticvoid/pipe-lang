@@ -1,8 +1,9 @@
 const std = @import("std");
-const BuiltinFn = @import("callable.zig").Callable.BuiltinFn;
-const Environment = @import("environment.zig").Environment;
+
 const RuntimeContext = @import("../runtime.zig").RuntimeContext;
-const Value = @import("../ast.zig").Value;
+const Environment = @import("environment.zig").Environment;
+const BuiltinFn = @import("callable.zig").Callable.BuiltinFn;
+const Value = @import("value.zig").Value;
 
 pub fn registerAll(env: *Environment) !void {
     try registerFn(env, "print", printFn);

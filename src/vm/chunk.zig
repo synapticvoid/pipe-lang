@@ -1,6 +1,6 @@
 const std = @import("std");
 const OpCode = @import("opcode.zig").OpCode;
-const Value = @import("../ast.zig").Value;
+const Value = @import("value.zig").Value;
 
 pub const ChunkError = error{
     InvalidOffset,

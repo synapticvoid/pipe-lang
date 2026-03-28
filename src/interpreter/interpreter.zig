@@ -8,8 +8,9 @@ const utils = @import("../utils.zig");
 const RuntimeContext = @import("../runtime.zig").RuntimeContext;
 const Environment = @import("environment.zig").Environment;
 const Callable = @import("callable.zig").Callable;
+const Value = @import("value.zig").Value;
+
 const Expression = ast.Expression;
-const Value = ast.Value;
 const Token = token.Token;
 const TokenType = token.TokenType;
 
@@ -185,7 +186,13 @@ pub const Interpreter = struct {
 
     pub fn evaluate(self: *Interpreter, expr: ast.Expression) InterpreterError!Value {
         return switch (expr) {
-            .literal => |e| e.value,
+            .literal => |e| switch (e.value) {
+                .int => |n| .{ .int = n },
+                .string => |s| .{ .string = s },
+                .boolean => |b| .{ .boolean = b },
+                .null => .null,
+                .unit => .unit,
+            },
             .variable => |e| self.env.get(e.token.lexeme),
             .var_assignment => |e| self.evaluateVarAssignment(e),
             .unary => |e| self.evaluateUnary(e),
@@ -444,7 +451,7 @@ pub const Interpreter = struct {
         return error.UndefinedField;
     }
 
-    fn evaluateBlock(self: *Interpreter, statements: []const ast.Statement, env: *Environment) !ast.Value {
+    fn evaluateBlock(self: *Interpreter, statements: []const ast.Statement, env: *Environment) !Value {
         const previous = self.env;
         self.env = env;
         defer self.env = previous;

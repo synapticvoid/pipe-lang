@@ -2,7 +2,6 @@ const std = @import("std");
 const activeTag = std.meta.activeTag;
 
 const Token = @import("token.zig").Token;
-const Callable = @import("interpreter/callable.zig").Callable;
 
 pub const Statement = union(enum) {
     // Expressions
@@ -209,28 +208,8 @@ pub const Value = union(enum) {
     int: i64,
     string: []const u8,
     boolean: bool,
-    function: Callable,
     null,
     unit,
-
-    // pointer so that copies of a value share identity (u2 = u1 means u1.field == u2.field)
-    // var u1 = User("Bob");
-    // var u2 = u1;
-    // if (u1.name == u2.name) { ... } // true
-    struct_instance: *StructInstance,
-
-    // Index of the VM function
-    // Stored in the function table in Program
-    vm_function: u16,
-
-    pub const StructInstance = struct {
-        type_name: []const u8,
-        field_names: []const []const u8,
-        body_field_values: []Value,
-        body_field_names: []const []const u8,
-        field_values: []Value,
-        kind: StructKind,
-    };
 
     pub fn eql(self: Value, other: Value) bool {
         const self_tag = activeTag(self);
@@ -244,23 +223,6 @@ pub const Value = union(enum) {
             .string => |a| std.mem.eql(u8, a, other.string),
             .boolean => |a| a == other.boolean,
             .null, .unit => true,
-            .vm_function => |a| a == other.vm_function,
-            .struct_instance => |a| {
-                const b = other.struct_instance;
-                if (a.kind == .plain) {
-                    return a == b;
-                }
-                if (!std.mem.eql(u8, a.type_name, b.type_name)) {
-                    return false;
-                }
-                for (a.field_values, b.field_values) |av, bv| {
-                    if (!av.eql(bv)) {
-                        return false;
-                    }
-                }
-                return true;
-            },
-            else => false,
         };
     }
 
@@ -277,10 +239,7 @@ pub const Value = union(enum) {
             .null, .unit => false,
             .boolean => |b| b,
             .int => |n| n != 0,
-            .function => true,
             .string => |s| s.len > 0,
-            .vm_function => true,
-            .struct_instance => |_| true,
         };
     }
 
@@ -296,31 +255,8 @@ pub const Value = union(enum) {
             .int => |n| try writer.print("{d}", .{n}),
             .string => |s| try writer.print("\"{s}\"", .{s}),
             .boolean => |b| try writer.print("{any}", .{b}),
-            .function => |f| switch (f) {
-                .user => |u| try writer.print("fn<{s}>", .{u.declaration.name.lexeme}),
-                .builtin => |bi| try writer.print("fn<{s}>", .{bi.name}),
-                .struct_constructor => |sc| try writer.print("fn<{s}>", .{sc.name}),
-            },
-            .vm_function => try writer.writeAll("fn"),
             .null => try writer.writeAll("null"),
             .unit => try writer.writeAll("unit"),
-            .struct_instance => |si_ptr| {
-                const si = si_ptr.*;
-                switch (si.kind) {
-                    .plain => try writer.print("<{s}>", .{si.type_name}),
-                    .case => {
-                        try writer.print("{s}(", .{si.type_name});
-                        for (si.field_names, si.field_values, 0..) |name, value, i| {
-                            if (i > 0) {
-                                try writer.writeAll(", ");
-                            }
-                            try writer.print("{s}=", .{name});
-                            try value.format(writer);
-                        }
-                        try writer.writeAll(")");
-                    },
-                }
-            },
         }
     }
 };
