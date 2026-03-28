@@ -68,8 +68,10 @@ pub const Vm = struct {
     }
 
     fn execute(self: *Vm) !Value {
+        // Hoist the frame pointer out of the loop; reload only on call/return when the active frame changes.
+        var frame = self.currentFrame();
+
         while (self.frame_count > 0) {
-            const frame = self.currentFrame();
             const op: OpCode = @enumFromInt(frame.chunk.code.items[frame.ip]);
             frame.ip += 1;
 
@@ -193,6 +195,8 @@ pub const Vm = struct {
 
                     // Push the return value on the stack of the caller
                     self.push(ret_value);
+                    // Update the frame only if we are NOT at the top level
+                    frame = self.currentFrame();
                 },
                 .call => {
                     // Read function arity
@@ -217,6 +221,7 @@ pub const Vm = struct {
                                 .base_slot = base_slot,
                             };
                             self.frame_count += 1;
+                            frame = self.currentFrame();
                         },
                         .native => {
                             // Slice of the fn args
