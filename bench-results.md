@@ -1,5 +1,5 @@
-| Command | Mean [s] | Min [s] | Max [s] | Relative |
+| Command | Mean [ms] | Min [ms] | Max [ms] | Relative |
 |:---|---:|---:|---:|---:|
-| `./zig-out/bin/pipe samples/fibonacci.pipe` | 4.492 ± 0.037 | 4.448 | 4.545 | 56.23 ± 2.10 |
-| `./zig-out/bin/pipe --interp samples/fibonacci.pipe` | 12.302 ± 0.123 | 12.171 | 12.449 | 154.01 ± 5.81 |
-| `python3 samples/fibonacci.py` | 0.080 ± 0.003 | 0.077 | 0.085 | 1.00 |
+| `./zig-out/bin/pipe samples/fibonacci.pipe` | 77.3 ± 0.5 | 76.9 | 78.1 | 1.04 ± 0.02 |
+| `./zig-out/bin/pipe --interp samples/fibonacci.pipe` | 2087.1 ± 28.3 | 2045.0 | 2123.2 | 28.22 ± 0.57 |
+| `python3 samples/fibonacci.py` | 74.0 ± 1.1 | 73.2 | 75.8 | 1.00 |

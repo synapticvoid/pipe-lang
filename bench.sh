@@ -7,7 +7,7 @@ FIB="samples/fibonacci.pipe"
 FIB_PY="samples/fibonacci.py"
 
 echo "==> Building pipe..."
-zig build
+zig build -Doptimize=ReleaseFast
 
 echo ""
 echo "==> Verifying outputs match..."
