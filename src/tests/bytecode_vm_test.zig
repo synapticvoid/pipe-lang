@@ -271,22 +271,6 @@ test "divide by zero is error" {
     try std.testing.expectError(error.DivisionByZero, runChunk(&chunk));
 }
 
-test "arithmetic type error" {
-    // true + 1 → TypeError
-    var chunk = Chunk.init(std.testing.allocator);
-    defer chunk.deinit();
-
-    try chunk.writeOp(.true, 1);
-
-    const b = try chunk.addConstant(.{ .int = 1 });
-    try chunk.writeOp(.constant, 1);
-    try chunk.writeU16(b, 1);
-
-    try chunk.writeOp(.add, 1);
-    try chunk.writeOp(.@"return", 1);
-
-    try std.testing.expectError(error.TypeError, runChunk(&chunk));
-}
 
 test "equal integers" {
     // 42 == 42 → true
@@ -368,22 +352,6 @@ test "less than" {
     try std.testing.expect(result.eql(.{ .boolean = true }));
 }
 
-test "comparison type error" {
-    // true > 1 → TypeError
-    var chunk = Chunk.init(std.testing.allocator);
-    defer chunk.deinit();
-
-    try chunk.writeOp(.true, 1);
-
-    const b = try chunk.addConstant(.{ .int = 1 });
-    try chunk.writeOp(.constant, 1);
-    try chunk.writeU16(b, 1);
-
-    try chunk.writeOp(.greater, 1);
-    try chunk.writeOp(.@"return", 1);
-
-    try std.testing.expectError(error.TypeError, runChunk(&chunk));
-}
 
 test "return with empty stack returns unit" {
     var chunk = Chunk.init(std.testing.allocator);

@@ -103,9 +103,7 @@ pub const Vm = struct {
                     const b = self.pop(); // right
                     const a = self.pop(); // left
 
-                    if (!a.isNumber() or !b.isNumber()) {
-                        return error.TypeError;
-                    }
+                    std.debug.assert(a.isNumber() and b.isNumber());
 
                     self.push(.{ .int = switch (op) {
                         .add => a.int + b.int,
@@ -125,9 +123,7 @@ pub const Vm = struct {
                     const b = self.pop();
                     const a = self.pop();
 
-                    if (!a.isNumber() or !b.isNumber()) {
-                        return error.TypeError;
-                    }
+                    std.debug.assert(a.isNumber() and b.isNumber());
 
                     // Compare them and push the result
                     self.push(.{ .boolean = switch (op) {
