@@ -220,7 +220,7 @@ pub const Value = union(enum) {
     struct_instance: *StructInstance,
 
     // Index of the VM function
-    // Stored in the function table in Module
+    // Stored in the function table in Program
     vm_function: u16,
 
     pub const StructInstance = struct {

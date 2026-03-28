@@ -32,10 +32,10 @@ fn runVm(source: []const u8, allocator: std.mem.Allocator) !void {
     var parser = Parser.init(tokens, allocator);
     const statements = try parser.parse();
 
-    var module = try bytecode.Compiler.compile(statements, allocator);
-    defer module.deinit();
+    var program = try bytecode.Compiler.compile(statements, allocator);
+    defer program.deinit();
 
-    var vm = bytecode.Vm.init(&module, allocator);
+    var vm = bytecode.Vm.init(&program, allocator);
     defer vm.deinit();
     _ = try vm.run();
 }

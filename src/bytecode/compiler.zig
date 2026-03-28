@@ -2,8 +2,8 @@ const std = @import("std");
 const Chunk = @import("chunk.zig").Chunk;
 const ChunkError = @import("chunk.zig").ChunkError;
 const OpCode = @import("opcode.zig").OpCode;
-const Module = @import("module.zig").Module;
-const FnObject = @import("function.zig").FnObject;
+const Program = @import("program.zig").Program;
+const FnObject = @import("program.zig").FnObject;
 const ast = @import("../ast.zig");
 const Value = ast.Value;
 
@@ -21,18 +21,18 @@ pub const CompileError = error{
 } || ChunkError;
 
 pub const Compiler = struct {
-    module: *Module,
+    program: *Program,
     chunk: *Chunk,
     locals: std.ArrayList(Local),
     scope_depth: u32,
     allocator: std.mem.Allocator,
 
-    // Static entry point to compile statements to a Module
-    pub fn compile(statements: []const ast.Statement, allocator: std.mem.Allocator) CompileError!Module {
-        var module = Module.init(allocator);
+    // Static entry point to compile statements to a Program
+    pub fn compile(statements: []const ast.Statement, allocator: std.mem.Allocator) CompileError!Program {
+        var program = Program.init(allocator);
         var compiler = Compiler{
-            .module = &module,
-            .chunk = &module.chunk,
+            .program = &program,
+            .chunk = &program.chunk,
             .locals = .{},
             .scope_depth = 0,
             .allocator = allocator,
@@ -40,13 +40,13 @@ pub const Compiler = struct {
         errdefer compiler.deinit();
 
         try compiler.compileStatements(statements);
-        return module;
+        return program;
     }
 
-    pub fn init(module: *Module, allocator: std.mem.Allocator) Compiler {
+    pub fn init(program: *Program, allocator: std.mem.Allocator) Compiler {
         return .{
-            .module = module,
-            .chunk = &module.chunk,
+            .program = program,
+            .chunk = &program.chunk,
             .locals = .{},
             .scope_depth = 0,
             .allocator = allocator,
@@ -124,7 +124,7 @@ pub const Compiler = struct {
         self.scope_depth = prev_scope_depth;
 
         // Emit the fn object into the enclosing chunk
-        const fn_idx = try self.module.addFunction(fn_obj);
+        const fn_idx = try self.program.addFunction(fn_obj);
         try self.emitConstant(.{ .vm_function = fn_idx }, fn_decl.name.line);
 
         // Declare the function name as a local (functions are first-class values)

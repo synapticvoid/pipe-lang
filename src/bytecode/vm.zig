@@ -2,8 +2,8 @@ const std = @import("std");
 const Chunk = @import("chunk.zig").Chunk;
 const OpCode = @import("opcode.zig").OpCode;
 const Value = @import("../ast.zig").Value;
-const FnObject = @import("function.zig").FnObject;
-const Module = @import("module.zig").Module;
+const FnObject = @import("program.zig").FnObject;
+const Program = @import("program.zig").Program;
 
 pub const VmError = error{
     DivisionByZero,
@@ -23,8 +23,8 @@ const CallFrame = struct {
 };
 
 pub const Vm = struct {
-    // Module containing the Chunk + VM tables
-    module: *const Module,
+    // Program containing the Chunk + VM tables
+    program: *const Program,
 
     // Value stack
     stack: std.ArrayList(Value),
@@ -39,9 +39,9 @@ pub const Vm = struct {
 
     allocator: std.mem.Allocator,
 
-    pub fn init(module: *const Module, allocator: std.mem.Allocator) Vm {
+    pub fn init(program: *const Program, allocator: std.mem.Allocator) Vm {
         return .{
-            .module = module,
+            .program = program,
             .stack = .{},
             .frames = undefined,
             .frame_count = 0,
@@ -57,7 +57,7 @@ pub const Vm = struct {
 
     pub fn run(self: *Vm) !Value {
         // Setup initial frame for top-level
-        self.frames[0] = .{ .chunk = &self.module.chunk, .ip = 0, .base_slot = 0 };
+        self.frames[0] = .{ .chunk = &self.program.chunk, .ip = 0, .base_slot = 0 };
         self.frame_count = 1;
         return self.execute();
     }
@@ -204,7 +204,7 @@ pub const Vm = struct {
                     if (callee != .vm_function) {
                         return error.NotCallable;
                     }
-                    const fn_obj: *const FnObject = &self.module.functions.items[callee.vm_function];
+                    const fn_obj: *const FnObject = &self.program.functions.items[callee.vm_function];
 
                     if (fn_obj.arity != arity) {
                         return error.ArityMismatch;

@@ -44,10 +44,10 @@ pub fn evaluateVm(source: []const u8, allocator: std.mem.Allocator) !VmEvalResul
     var parser = pipe.Parser.init(tokens, allocator);
     const statements = try parser.parse();
 
-    var module = pipe.bytecode.Module.init(allocator);
-    defer module.deinit();
+    var program = pipe.bytecode.Program.init(allocator);
+    defer program.deinit();
 
-    var compiler = pipe.bytecode.Compiler.init(&module, allocator);
+    var compiler = pipe.bytecode.Compiler.init(&program, allocator);
     defer compiler.deinit();
 
     // Compile all statements, but for the last expression statement
@@ -61,7 +61,7 @@ pub fn evaluateVm(source: []const u8, allocator: std.mem.Allocator) !VmEvalResul
         }
     }
 
-    var vm = pipe.bytecode.Vm.init(&module, allocator);
+    var vm = pipe.bytecode.Vm.init(&program, allocator);
     defer vm.deinit();
     const result = try vm.run();
 
