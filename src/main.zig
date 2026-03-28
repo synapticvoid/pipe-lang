@@ -2,9 +2,9 @@ const std = @import("std");
 const Lexer = @import("lexer.zig").Lexer;
 const Parser = @import("parser.zig").Parser;
 const TypeChecker = @import("type_checker.zig").TypeChecker;
-const Interpreter = @import("interpreter.zig").Interpreter;
+const Interpreter = @import("interpreter/interpreter.zig").Interpreter;
 const RuntimeContext = @import("runtime.zig").RuntimeContext;
-const bytecode = @import("bytecode/root.zig");
+const vm = @import("vm/root.zig");
 
 const max_file_size = 10 * 1024 * 1024; // 10MB, should be plenty enough
 const max_input_size = 1024 * 1024; // 1MB, should be plenty enough
@@ -32,12 +32,12 @@ fn runVm(source: []const u8, allocator: std.mem.Allocator) !void {
     var parser = Parser.init(tokens, allocator);
     const statements = try parser.parse();
 
-    var program = try bytecode.Compiler.compile(statements, allocator);
+    var program = try vm.Compiler.compile(statements, allocator);
     defer program.deinit();
 
-    var vm = bytecode.Vm.init(&program, allocator);
-    defer vm.deinit();
-    _ = try vm.run();
+    var machine = vm.Vm.init(&program, allocator);
+    defer machine.deinit();
+    _ = try machine.run();
 }
 
 fn runInterpreter(source: []const u8, ctx: RuntimeContext, allocator: std.mem.Allocator) !void {

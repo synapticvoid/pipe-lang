@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const ast = @import("ast.zig");
+const ast = @import("../ast.zig");
 const Value = ast.Value;
 
 pub const Environment = struct {

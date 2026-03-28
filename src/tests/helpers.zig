@@ -44,10 +44,10 @@ pub fn evaluateVm(source: []const u8, allocator: std.mem.Allocator) !VmEvalResul
     var parser = pipe.Parser.init(tokens, allocator);
     const statements = try parser.parse();
 
-    var program = pipe.bytecode.Program.init(allocator);
+    var program = pipe.vm.Program.init(allocator);
     defer program.deinit();
 
-    var compiler = pipe.bytecode.Compiler.init(&program, allocator);
+    var compiler = pipe.vm.Compiler.init(&program, allocator);
     defer compiler.deinit();
 
     // Compile all statements, but for the last expression statement
@@ -61,7 +61,7 @@ pub fn evaluateVm(source: []const u8, allocator: std.mem.Allocator) !VmEvalResul
         }
     }
 
-    var vm = pipe.bytecode.Vm.init(&program, allocator);
+    var vm = pipe.vm.Vm.init(&program, allocator);
     defer vm.deinit();
     const result = try vm.run();
 
@@ -75,7 +75,7 @@ pub fn evaluate(source: []const u8, allocator: std.mem.Allocator) !EvalResult {
 
     var aw: std.Io.Writer.Allocating = .init(allocator);
     const ctx = pipe.RuntimeContext{ .writer = &aw.writer };
-    var interpreter = try pipe.Interpreter.init(ctx, allocator);
+    var interpreter = try pipe.interpreter.Interpreter.init(ctx, allocator);
     defer interpreter.deinit();
 
     var result: pipe.ast.Value = .null;

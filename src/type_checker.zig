@@ -1,7 +1,6 @@
 const std = @import("std");
 
 const ast = @import("ast.zig");
-const builtins = @import("builtins.zig");
 const types = @import("types.zig");
 const utils = @import("utils.zig");
 const PipeType = types.PipeType;
@@ -94,7 +93,7 @@ pub const TypeChecker = struct {
     pub fn init(allocator: std.mem.Allocator) !TypeChecker {
         const env = try allocator.create(TypeEnvironment);
         env.* = TypeEnvironment.init(null, allocator);
-        try builtins.registerAllTypes(env);
+        try registerBuiltinTypes(env);
 
         return .{
             .env = env,
@@ -1044,3 +1043,10 @@ pub const TypeChecker = struct {
         return true;
     }
 };
+
+fn registerBuiltinTypes(env: *TypeEnvironment) !void {
+    try env.define("print", .{ .function = .{
+        .param_types = &.{PipeType.any},
+        .return_type = PipeType.unit,
+    } });
+}

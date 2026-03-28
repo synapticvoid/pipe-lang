@@ -1,7 +1,7 @@
 const std = @import("std");
-const bytecode = @import("pipe").bytecode;
-const Chunk = bytecode.Chunk;
-const OpCode = bytecode.OpCode;
+const vm_pkg = @import("pipe").vm;
+const Chunk = vm_pkg.Chunk;
+const OpCode = vm_pkg.OpCode;
 
 test "code and lines arrays stay in sync" {
     const allocator = std.testing.allocator;

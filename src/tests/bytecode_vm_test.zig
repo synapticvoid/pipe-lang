@@ -1,9 +1,9 @@
 const std = @import("std");
-const bytecode = @import("pipe").bytecode;
-const Chunk = bytecode.Chunk;
-const OpCode = bytecode.OpCode;
-const Vm = bytecode.Vm;
-const Program = bytecode.Program;
+const vm_pkg = @import("pipe").vm;
+const Chunk = vm_pkg.Chunk;
+const OpCode = vm_pkg.OpCode;
+const Vm = vm_pkg.Vm;
+const Program = vm_pkg.Program;
 const Value = @import("pipe").ast.Value;
 
 // ---------------------------------------------------------------------------

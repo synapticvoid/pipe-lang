@@ -1,8 +1,8 @@
 const std = @import("std");
-const bytecode = @import("pipe").bytecode;
-const Chunk = bytecode.Chunk;
-const OpCode = bytecode.OpCode;
-const disassemble = bytecode.disassemble;
+const vm_pkg = @import("pipe").vm;
+const Chunk = vm_pkg.Chunk;
+const OpCode = vm_pkg.OpCode;
+const disassemble = vm_pkg.disassemble;
 
 fn disassembleToString(chunk: *const Chunk) ![]const u8 {
     var buf: std.ArrayList(u8) = .{};

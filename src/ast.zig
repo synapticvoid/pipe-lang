@@ -2,7 +2,7 @@ const std = @import("std");
 const activeTag = std.meta.activeTag;
 
 const Token = @import("token.zig").Token;
-const Callable = @import("callable.zig").Callable;
+const Callable = @import("interpreter/callable.zig").Callable;
 
 pub const Statement = union(enum) {
     // Expressions

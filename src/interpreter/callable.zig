@@ -1,6 +1,6 @@
-const ast = @import("ast.zig");
+const ast = @import("../ast.zig");
 const Environment = @import("environment.zig").Environment;
-const RuntimeContext = @import("runtime.zig").RuntimeContext;
+const RuntimeContext = @import("../runtime.zig").RuntimeContext;
 
 pub const Callable = union(enum) {
     user: UserFn,

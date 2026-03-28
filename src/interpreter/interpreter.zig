@@ -1,11 +1,11 @@
 const std = @import("std");
-const ast = @import("ast.zig");
+const ast = @import("../ast.zig");
 const builtins = @import("builtins.zig");
-const token = @import("token.zig");
-const types = @import("types.zig");
-const utils = @import("utils.zig");
+const token = @import("../token.zig");
+const types = @import("../types.zig");
+const utils = @import("../utils.zig");
 
-const RuntimeContext = @import("runtime.zig").RuntimeContext;
+const RuntimeContext = @import("../runtime.zig").RuntimeContext;
 const Environment = @import("environment.zig").Environment;
 const Callable = @import("callable.zig").Callable;
 const Expression = ast.Expression;
