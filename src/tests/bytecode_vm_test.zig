@@ -820,13 +820,3 @@ test "loop jumps backward" {
     try std.testing.expect(result.eql(.{ .int = 6 })); // 3 + 2 + 1
 }
 
-test "stack underflow is error" {
-    // Try to add with empty stack
-    var chunk = Chunk.init(std.testing.allocator);
-    defer chunk.deinit();
-
-    try chunk.writeOp(.add, 1);
-    try chunk.writeOp(.@"return", 1);
-
-    try std.testing.expectError(error.StackUnderflow, runChunk(&chunk));
-}

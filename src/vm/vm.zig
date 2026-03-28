@@ -8,13 +8,13 @@ const Program = @import("program.zig").Program;
 
 pub const VmError = error{
     DivisionByZero,
-    StackUnderflow, // Pop from empty stack
     TypeError, // wront types for arithmetic/negate/table
     UndefinedVariable,
     ArityMismatch,
     NotCallable, // Not a function/method that we can call
 };
 
+const MAX_STACK = 256;
 const MAX_FRAMES = 64;
 
 const CallFrame = struct {
@@ -63,6 +63,7 @@ pub const Vm = struct {
         // Setup initial frame for top-level
         self.frames[0] = .{ .chunk = &self.program.chunk, .ip = 0, .base_slot = 0 };
         self.frame_count = 1;
+        try self.stack.ensureTotalCapacity(self.allocator, MAX_STACK);
         return self.execute();
     }
 
@@ -76,37 +77,37 @@ pub const Vm = struct {
                 .constant => {
                     // Read pool index from chunk
                     const idx = readU16(frame.chunk, &frame.ip);
-                    try self.push(frame.chunk.constants.items[idx]);
+                    self.push(frame.chunk.constants.items[idx]);
                 },
-                .true => try self.push(.{ .boolean = true }),
-                .false => try self.push(.{ .boolean = false }),
-                .null => try self.push(.null),
-                .unit => try self.push(.unit),
-                .pop => _ = try self.pop(),
+                .true => self.push(.{ .boolean = true }),
+                .false => self.push(.{ .boolean = false }),
+                .null => self.push(.null),
+                .unit => self.push(.unit),
+                .pop => _ = self.pop(),
                 .negate => {
-                    const val = try self.pop();
+                    const val = self.pop();
                     if (!val.isNumber()) {
                         return VmError.TypeError;
                     }
 
-                    try self.push(switch (val) {
+                    self.push(switch (val) {
                         .int => |n| .{ .int = -n },
                         else => unreachable,
                     });
                 },
                 .not => {
-                    const val = try self.pop();
-                    try self.push(.{ .boolean = !val.isTruthy() });
+                    const val = self.pop();
+                    self.push(.{ .boolean = !val.isTruthy() });
                 },
                 .add, .subtract, .multiply, .divide => {
-                    const b = try self.pop(); // right
-                    const a = try self.pop(); // left
+                    const b = self.pop(); // right
+                    const a = self.pop(); // left
 
                     if (!a.isNumber() or !b.isNumber()) {
                         return error.TypeError;
                     }
 
-                    try self.push(.{ .int = switch (op) {
+                    self.push(.{ .int = switch (op) {
                         .add => a.int + b.int,
                         .subtract => a.int - b.int,
                         .multiply => a.int * b.int,
@@ -115,21 +116,21 @@ pub const Vm = struct {
                     } });
                 },
                 .equal => {
-                    const b = try self.pop();
-                    const a = try self.pop();
-                    try self.push(.{ .boolean = a.eql(b) });
+                    const b = self.pop();
+                    const a = self.pop();
+                    self.push(.{ .boolean = a.eql(b) });
                 },
                 .greater, .less => {
                     // Read operands from stack
-                    const b = try self.pop();
-                    const a = try self.pop();
+                    const b = self.pop();
+                    const a = self.pop();
 
                     if (!a.isNumber() or !b.isNumber()) {
                         return error.TypeError;
                     }
 
                     // Compare them and push the result
-                    try self.push(.{ .boolean = switch (op) {
+                    self.push(.{ .boolean = switch (op) {
                         .greater => a.int > b.int,
                         .less => a.int < b.int,
                         else => unreachable,
@@ -140,13 +141,13 @@ pub const Vm = struct {
                     const idx = readU16(frame.chunk, &frame.ip);
                     const name = frame.chunk.constants.items[idx].string;
 
-                    const val = try self.pop();
+                    const val = self.pop();
                     try self.globals.put(self.allocator, name, val);
                 },
                 .get_global => {
                     const idx = readU16(frame.chunk, &frame.ip);
                     const val = self.globals.get(frame.chunk.constants.items[idx].string) orelse return error.UndefinedVariable;
-                    try self.push(val);
+                    self.push(val);
                 },
                 .set_global => {
                     const idx = readU16(frame.chunk, &frame.ip);
@@ -160,7 +161,7 @@ pub const Vm = struct {
                 },
                 .get_local => {
                     const idx = frame.base_slot + readU16(frame.chunk, &frame.ip);
-                    try self.push(self.stack.items[idx]);
+                    self.push(self.stack.items[idx]);
                 },
                 .set_local => {
                     const idx = frame.base_slot + readU16(frame.chunk, &frame.ip);
@@ -172,7 +173,7 @@ pub const Vm = struct {
                     const offset = readU16(frame.chunk, &frame.ip);
 
                     // Evalute condition on stack
-                    const condition = try self.pop();
+                    const condition = self.pop();
                     if (!condition.isTruthy()) {
                         frame.ip = offset;
                     }
@@ -181,7 +182,7 @@ pub const Vm = struct {
                 .@"return" => {
                     // Pop the return value (or unit if stack is at base)
                     const ret_value = if (self.stack.items.len > frame.base_slot)
-                        try self.pop()
+                        self.pop()
                     else
                         Value.unit;
 
@@ -195,7 +196,7 @@ pub const Vm = struct {
                     }
 
                     // Push the return value on the stack of the caller
-                    try self.push(ret_value);
+                    self.push(ret_value);
                 },
                 .call => {
                     // Read function arity
@@ -228,7 +229,7 @@ pub const Vm = struct {
                             // Call builtin function, remove the args and push the return value
                             const ret_value = callee.native.func(args, self.ctx);
                             self.stack.shrinkRetainingCapacity(base_slot);
-                            try self.push(ret_value);
+                            self.push(ret_value);
                         },
                         else => return error.NotCallable,
                     }
@@ -242,16 +243,13 @@ pub const Vm = struct {
     // NOTE: -- Helpers
 
     // Pushes the value onto the stack
-    fn push(self: *Vm, value: Value) !void {
-        try self.stack.append(self.allocator, value);
+    fn push(self: *Vm, value: Value) void {
+        self.stack.appendAssumeCapacity(value);
     }
 
     // Pops the value from the stack
-    fn pop(self: *Vm) !Value {
-        if (self.stack.items.len == 0) {
-            return error.StackUnderflow;
-        }
-
+    fn pop(self: *Vm) Value {
+        std.debug.assert(self.stack.items.len > 0);
         // Unwrap the nullable or crash. Life is hard.
         return self.stack.pop().?;
     }
