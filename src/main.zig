@@ -39,6 +39,7 @@ fn runVm(source: []const u8, ctx: RuntimeContext, allocator: std.mem.Allocator) 
     defer machine.deinit();
     try vm.builtins.registerAll(&machine.globals, allocator);
     _ = try machine.run();
+    try ctx.writer.flush();
 }
 
 fn runInterpreter(source: []const u8, ctx: RuntimeContext, allocator: std.mem.Allocator) !void {

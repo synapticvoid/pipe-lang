@@ -408,7 +408,6 @@ pub const TypeChecker = struct {
             .int => .int,
             .string => .string,
             .null, .unit => .unit,
-
         };
         return .{ .variable = .{ .pipe_type = pipe_type, .mutability = .constant } };
     }
