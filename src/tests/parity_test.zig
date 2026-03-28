@@ -102,3 +102,54 @@ test "parity: recursion" {
         "fn fact(n: Int) Int { if n <= 1 { return 1; } else { return n * fact(n - 1); } } fact(5);",
     });
 }
+
+fn expectOutputParity(cases: anytype) !void {
+    inline for (cases) |case| {
+        const source = case[0];
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+        const allocator = arena.allocator();
+
+        var interp = try helpers.evaluate(source, allocator);
+        defer interp.deinit();
+
+        var vm = try helpers.evaluateVm(source, allocator);
+        defer vm.deinit();
+
+        std.testing.expectEqualStrings(interp.output, vm.output) catch |err| {
+            std.debug.print("\nOutput parity failure for: {s}\n  interpreter: {s}\n  vm:          {s}\n", .{ source, interp.output, vm.output });
+            return err;
+        };
+
+        // Also verify against the expected output if provided
+        const expected = case[1];
+        std.testing.expectEqualStrings(expected, vm.output) catch |err| {
+            std.debug.print("\nExpected output failure for: {s}\n  expected: {s}\n  got:      {s}\n", .{ source, expected, vm.output });
+            return err;
+        };
+    }
+}
+
+test "parity: print integer" {
+    try expectOutputParity(.{
+        .{ "print(42);", "42\n" },
+    });
+}
+
+test "parity: print string" {
+    try expectOutputParity(.{
+        .{ "print(\"hello\");", "hello\n" },
+    });
+}
+
+test "parity: print multiple args" {
+    try expectOutputParity(.{
+        .{ "print(1, 2, 3);", "1 2 3\n" },
+    });
+}
+
+test "parity: print boolean" {
+    try expectOutputParity(.{
+        .{ "print(true);", "true\n" },
+    });
+}

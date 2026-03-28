@@ -19,13 +19,13 @@ fn run(source: []const u8, ctx: RuntimeContext, use_interp: bool, allocator: std
             else => std.debug.print("Error: {}\n", .{err}),
         };
     } else {
-        runVm(source, arena.allocator()) catch |err| {
+        runVm(source, ctx, arena.allocator()) catch |err| {
             std.debug.print("VM error: {}\n", .{err});
         };
     }
 }
 
-fn runVm(source: []const u8, allocator: std.mem.Allocator) !void {
+fn runVm(source: []const u8, ctx: RuntimeContext, allocator: std.mem.Allocator) !void {
     var lexer = Lexer.init(source, allocator);
     const tokens = try lexer.tokenize();
 
@@ -35,8 +35,9 @@ fn runVm(source: []const u8, allocator: std.mem.Allocator) !void {
     var program = try vm.Compiler.compile(statements, allocator);
     defer program.deinit();
 
-    var machine = vm.Vm.init(&program, allocator);
+    var machine = vm.Vm.init(&program, ctx, allocator);
     defer machine.deinit();
+    try vm.builtins.registerAll(&machine.globals, allocator);
     _ = try machine.run();
 }
 

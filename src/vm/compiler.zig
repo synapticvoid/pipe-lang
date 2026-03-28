@@ -126,7 +126,7 @@ pub const Compiler = struct {
 
         // Emit the fn object into the enclosing chunk
         const fn_idx = try self.program.addFunction(fn_obj);
-        try self.emitConstant(.{ .vm_function = fn_idx }, fn_decl.name.line);
+        try self.emitConstant(.{ .function = fn_idx }, fn_decl.name.line);
 
         // Declare the function name as a local (functions are first-class values)
         // If we are the the top-level, store as a global

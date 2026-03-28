@@ -1,4 +1,5 @@
 const std = @import("std");
+const RuntimeContext = @import("../runtime.zig").RuntimeContext;
 const Chunk = @import("chunk.zig").Chunk;
 const OpCode = @import("opcode.zig").OpCode;
 const Value = @import("value.zig").Value;
@@ -37,15 +38,18 @@ pub const Vm = struct {
     // name -> value
     globals: std.StringHashMapUnmanaged(Value),
 
+    ctx: RuntimeContext,
+
     allocator: std.mem.Allocator,
 
-    pub fn init(program: *const Program, allocator: std.mem.Allocator) Vm {
+    pub fn init(program: *const Program, ctx: RuntimeContext, allocator: std.mem.Allocator) Vm {
         return .{
             .program = program,
             .stack = .{},
             .frames = undefined,
             .frame_count = 0,
             .globals = .{},
+            .ctx = ctx,
             .allocator = allocator,
         };
     }
@@ -201,22 +205,33 @@ pub const Vm = struct {
                     const base_slot = self.stack.items.len - 1 - arity;
                     const callee = self.stack.items[base_slot];
 
-                    if (callee != .vm_function) {
-                        return error.NotCallable;
-                    }
-                    const fn_obj: *const FnObject = &self.program.functions.items[callee.vm_function];
+                    switch (callee) {
+                        .function => {
+                            const fn_obj: *const FnObject = &self.program.functions.items[callee.function];
 
-                    if (fn_obj.arity != arity) {
-                        return error.ArityMismatch;
-                    }
+                            if (fn_obj.arity != arity) {
+                                return error.ArityMismatch;
+                            }
 
-                    // Push the frame
-                    self.frames[self.frame_count] = .{
-                        .chunk = &fn_obj.chunk,
-                        .ip = 0,
-                        .base_slot = base_slot,
-                    };
-                    self.frame_count += 1;
+                            // Push the frame
+                            self.frames[self.frame_count] = .{
+                                .chunk = &fn_obj.chunk,
+                                .ip = 0,
+                                .base_slot = base_slot,
+                            };
+                            self.frame_count += 1;
+                        },
+                        .native => {
+                            // Slice of the fn args
+                            const args = self.stack.items[base_slot + 1 .. base_slot + 1 + arity];
+
+                            // Call builtin function, remove the args and push the return value
+                            const ret_value = callee.native.func(args, self.ctx);
+                            self.stack.shrinkRetainingCapacity(base_slot);
+                            try self.push(ret_value);
+                        },
+                        else => return error.NotCallable,
+                    }
                 },
             }
         }

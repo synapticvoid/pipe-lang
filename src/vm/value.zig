@@ -1,5 +1,14 @@
 const std = @import("std");
 const activeTag = std.meta.activeTag;
+const RuntimeContext = @import("../runtime.zig").RuntimeContext;
+
+pub const NativeFn = struct {
+    pub const Func = *const fn (args: []const Value, ctx: RuntimeContext) Value;
+
+    name: []const u8,
+    arity: ?u8, // null = variadic
+    func: Func,
+};
 
 pub const Value = union(enum) {
     int: i64,
@@ -10,7 +19,9 @@ pub const Value = union(enum) {
 
     // Index of the VM function
     // Stored in the function table in Program
-    vm_function: u16,
+    function: u16,
+
+    native: NativeFn,
 
     pub fn eql(self: Value, other: Value) bool {
         const self_tag = activeTag(self);
@@ -24,7 +35,8 @@ pub const Value = union(enum) {
             .string => |a| std.mem.eql(u8, a, other.string),
             .boolean => |a| a == other.boolean,
             .null, .unit => true,
-            .vm_function => |a| a == other.vm_function,
+            .function => |a| a == other.function,
+            .native => |a| a.func == other.native.func,
         };
     }
 
@@ -42,7 +54,7 @@ pub const Value = union(enum) {
             .boolean => |b| b,
             .int => |n| n != 0,
             .string => |s| s.len > 0,
-            .vm_function => true,
+            .function, .native => true,
         };
     }
 
@@ -58,7 +70,8 @@ pub const Value = union(enum) {
             .int => |n| try writer.print("{d}", .{n}),
             .string => |s| try writer.print("\"{s}\"", .{s}),
             .boolean => |b| try writer.print("{any}", .{b}),
-            .vm_function => try writer.writeAll("fn"),
+            .function => try writer.writeAll("fn"),
+            .native => |b| try writer.print("<builtin {s}>", .{b.name}),
             .null => try writer.writeAll("null"),
             .unit => try writer.writeAll("unit"),
         }

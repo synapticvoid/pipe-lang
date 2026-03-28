@@ -33,9 +33,11 @@ pub fn typeCheck(source: []const u8, allocator: std.mem.Allocator) !void {
 
 pub const VmEvalResult = struct {
     value: pipe.vm.Value,
+    output: []const u8,
+    allocating: std.Io.Writer.Allocating,
 
     pub fn deinit(self: *VmEvalResult) void {
-        _ = self;
+        self.allocating.deinit();
     }
 };
 
@@ -61,11 +63,15 @@ pub fn evaluateVm(source: []const u8, allocator: std.mem.Allocator) !VmEvalResul
         }
     }
 
-    var vm = pipe.vm.Vm.init(&program, allocator);
+    var aw: std.Io.Writer.Allocating = .init(allocator);
+    const ctx = pipe.RuntimeContext{ .writer = &aw.writer };
+
+    var vm = pipe.vm.Vm.init(&program, ctx, allocator);
     defer vm.deinit();
+    try pipe.vm.builtins.registerAll(&vm.globals, allocator);
     const result = try vm.run();
 
-    return .{ .value = result };
+    return .{ .value = result, .output = aw.written(), .allocating = aw };
 }
 
 pub fn evaluate(source: []const u8, allocator: std.mem.Allocator) !EvalResult {

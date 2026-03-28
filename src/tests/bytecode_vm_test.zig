@@ -1,10 +1,12 @@
 const std = @import("std");
-const vm_pkg = @import("pipe").vm;
+const pipe = @import("pipe");
+const vm_pkg = pipe.vm;
 const Chunk = vm_pkg.Chunk;
 const OpCode = vm_pkg.OpCode;
 const Vm = vm_pkg.Vm;
 const Program = vm_pkg.Program;
 const Value = vm_pkg.Value;
+const RuntimeContext = pipe.RuntimeContext;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -17,7 +19,10 @@ fn runChunk(chunk: *Chunk) !Value {
     defer program.deinit();
     program.chunk = chunk.*;
     chunk.* = Chunk.init(std.testing.allocator);
-    var vm = Vm.init(&program, std.testing.allocator);
+    var aw: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer aw.deinit();
+    const ctx = RuntimeContext{ .writer = &aw.writer };
+    var vm = Vm.init(&program, ctx, std.testing.allocator);
     defer vm.deinit();
     return try vm.run();
 }
@@ -29,12 +34,11 @@ fn runChunkCapturingOutput(chunk: *Chunk) !struct { result: Value, output: []con
     defer program.deinit();
     program.chunk = chunk.*;
     chunk.* = Chunk.init(std.testing.allocator);
-    var vm = Vm.init(&program, std.testing.allocator);
-    defer vm.deinit();
-
     var buf = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer buf.deinit();
-    vm.setOutputWriter(&buf.writer);
+    const ctx = RuntimeContext{ .writer = &buf.writer };
+    var vm = Vm.init(&program, ctx, std.testing.allocator);
+    defer vm.deinit();
 
     const result = try vm.run();
     return .{ .result = result, .output = try buf.toOwnedSlice() };
