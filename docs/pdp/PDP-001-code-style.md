@@ -60,9 +60,9 @@ No synonyms in stdlib — one canonical name per concept.
 Conversion methods are named `to_<type>()` and live on the source value:
 
 ```
-"3".to_int()      # ParseError!Int
-"3.14".to_float() # ParseError!Float
-42.to_str()       # Str
+"3".to_int()      // ParseError!Int
+"3.14".to_float() // ParseError!Float
+42.to_str()       // Str
 ```
 
 Fallible conversions return an error union and must be handled explicitly:
@@ -88,6 +88,17 @@ var n = "abc".to_int() catch 0
 Any struct can override `to_str()` to control its string representation.
 This is the canonical way to make a type printable. The protocol backing
 this is deferred to a future PDP.
+
+## Comments
+
+Pipe uses `//` for single-line comments:
+
+```
+// This is a comment
+var x = 42  // inline comment
+```
+
+There are no block comments.
 
 ## Rationale
 

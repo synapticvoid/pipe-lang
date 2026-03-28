@@ -12,7 +12,8 @@
       "Bash(gh api:*)",
       "Bash(gh label:*)",
       "Bash(find /home/robin/projects/robin/pipe-lang/src/vm /home/robin/projects/robin/pipe-lang/src/interpreter -type f -name *.zig)",
-      "Bash(./bench.sh 5)"
+      "Bash(./bench.sh 5)",
+      "Bash(find /home/robin/projects/robin/pipe-lang/docs/pdp -type f -name *.md)"
     ]
   }
 }
