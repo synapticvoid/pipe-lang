@@ -40,6 +40,7 @@ pub const Compiler = struct {
         errdefer compiler.deinit();
 
         try compiler.compileStatements(statements);
+        try compiler.emitOp(.@"return", 0);
         return program;
     }
 

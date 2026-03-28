@@ -112,6 +112,10 @@ pub fn main() !void {
 
     if (file_path) |path| {
         try runFile(path, ctx, use_interp, allocator);
+    } else if (!std.posix.isatty(std.posix.STDIN_FILENO)) {
+        const source = try std.fs.File.stdin().readToEndAlloc(allocator, max_input_size);
+        defer allocator.free(source);
+        run(source, ctx, use_interp, allocator);
     } else {
         try repl(ctx, use_interp, allocator);
     }
