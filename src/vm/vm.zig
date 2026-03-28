@@ -8,7 +8,7 @@ const Program = @import("program.zig").Program;
 
 pub const VmError = error{
     DivisionByZero,
-    TypeError, // wront types for arithmetic/negate/table
+    TypeError, // wrong types for arithmetic/negate/table
     UndefinedVariable,
     ArityMismatch,
     NotCallable, // Not a function/method that we can call
@@ -27,8 +27,15 @@ pub const Vm = struct {
     // Program containing the Chunk + VM tables
     program: *const Program,
 
+    // Use Arrays rather than ArrayLists for performance.
+    // The size is fixed anyway, so we don't need to worry about resizing.
+    // ArrayList data is contiguous but lives on the heap behind a pointer,
+    // meaning that each access requires a pointer indirection.
+    // With an Array, the value is just an arithmetic offset off the struct base pointer.
+
     // Value stack
-    stack: std.ArrayList(Value),
+    stack: [MAX_STACK]Value,
+    stack_top: usize,
 
     // Call frame stack
     frames: [MAX_FRAMES]CallFrame,
@@ -45,7 +52,8 @@ pub const Vm = struct {
     pub fn init(program: *const Program, ctx: RuntimeContext, allocator: std.mem.Allocator) Vm {
         return .{
             .program = program,
-            .stack = .{},
+            .stack = undefined,
+            .stack_top = 0,
             .frames = undefined,
             .frame_count = 0,
             .globals = .{},
@@ -55,7 +63,6 @@ pub const Vm = struct {
     }
 
     pub fn deinit(self: *Vm) void {
-        self.stack.deinit(self.allocator);
         self.globals.deinit(self.allocator);
     }
 
@@ -63,7 +70,6 @@ pub const Vm = struct {
         // Setup initial frame for top-level
         self.frames[0] = .{ .chunk = &self.program.chunk, .ip = 0, .base_slot = 0 };
         self.frame_count = 1;
-        try self.stack.ensureTotalCapacity(self.allocator, MAX_STACK);
         return self.execute();
     }
 
@@ -152,18 +158,18 @@ pub const Vm = struct {
                     const name = frame.chunk.constants.items[idx].string;
 
                     if (self.globals.getPtr(name)) |ptr| {
-                        ptr.* = self.stack.getLast();
+                        ptr.* = self.stack[self.stack_top - 1];
                     } else {
                         return error.UndefinedVariable;
                     }
                 },
                 .get_local => {
                     const idx = frame.base_slot + readU16(frame.chunk, &frame.ip);
-                    self.push(self.stack.items[idx]);
+                    self.push(self.stack[idx]);
                 },
                 .set_local => {
                     const idx = frame.base_slot + readU16(frame.chunk, &frame.ip);
-                    self.stack.items[idx] = self.stack.getLast();
+                    self.stack[idx] = self.stack[self.stack_top - 1];
                 },
                 .jump => frame.ip = readU16(frame.chunk, &frame.ip),
                 .jump_if_false => {
@@ -179,13 +185,13 @@ pub const Vm = struct {
                 .loop => frame.ip = readU16(frame.chunk, &frame.ip),
                 .@"return" => {
                     // Pop the return value (or unit if stack is at base)
-                    const ret_value = if (self.stack.items.len > frame.base_slot)
+                    const ret_value = if (self.stack_top > frame.base_slot)
                         self.pop()
                     else
                         Value.unit;
 
                     // Remove all locals of the current stack frame
-                    self.stack.shrinkRetainingCapacity(frame.base_slot);
+                    self.stack_top = frame.base_slot;
                     self.frame_count -= 1;
 
                     // Top-level frame, return the value
@@ -203,8 +209,8 @@ pub const Vm = struct {
                     const arity = readU8(frame.chunk, &frame.ip);
 
                     // Peak the callee to check if we can cast it to *FnObject
-                    const base_slot = self.stack.items.len - 1 - arity;
-                    const callee = self.stack.items[base_slot];
+                    const base_slot = self.stack_top - 1 - arity;
+                    const callee = self.stack[base_slot];
 
                     switch (callee) {
                         .function => {
@@ -225,11 +231,11 @@ pub const Vm = struct {
                         },
                         .native => {
                             // Slice of the fn args
-                            const args = self.stack.items[base_slot + 1 .. base_slot + 1 + arity];
+                            const args = self.stack[base_slot + 1 .. base_slot + 1 + arity];
 
                             // Call builtin function, remove the args and push the return value
                             const ret_value = callee.native.func(args, self.ctx);
-                            self.stack.shrinkRetainingCapacity(base_slot);
+                            self.stack_top = base_slot;
                             self.push(ret_value);
                         },
                         else => return error.NotCallable,
@@ -245,14 +251,15 @@ pub const Vm = struct {
 
     // Pushes the value onto the stack
     fn push(self: *Vm, value: Value) void {
-        self.stack.appendAssumeCapacity(value);
+        self.stack[self.stack_top] = value;
+        self.stack_top += 1;
     }
 
     // Pops the value from the stack
     fn pop(self: *Vm) Value {
-        std.debug.assert(self.stack.items.len > 0);
-        // Unwrap the nullable or crash. Life is hard.
-        return self.stack.pop().?;
+        std.debug.assert(self.stack_top > 0);
+        self.stack_top -= 1;
+        return self.stack[self.stack_top];
     }
 
     // Read a 8-bit value from the code

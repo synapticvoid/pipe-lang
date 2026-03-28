@@ -271,7 +271,6 @@ test "divide by zero is error" {
     try std.testing.expectError(error.DivisionByZero, runChunk(&chunk));
 }
 
-
 test "equal integers" {
     // 42 == 42 → true
     var chunk = Chunk.init(std.testing.allocator);
@@ -351,7 +350,6 @@ test "less than" {
     const result = try runChunk(&chunk);
     try std.testing.expect(result.eql(.{ .boolean = true }));
 }
-
 
 test "return with empty stack returns unit" {
     var chunk = Chunk.init(std.testing.allocator);
@@ -787,4 +785,3 @@ test "loop jumps backward" {
     const result = try runChunk(&chunk);
     try std.testing.expect(result.eql(.{ .int = 6 })); // 3 + 2 + 1
 }
-
