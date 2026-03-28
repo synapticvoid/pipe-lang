@@ -2,6 +2,7 @@ const std = @import("std");
 const Chunk = @import("chunk.zig").Chunk;
 const ChunkError = @import("chunk.zig").ChunkError;
 const OpCode = @import("opcode.zig").OpCode;
+const Module = @import("module.zig").Module;
 const FnObject = @import("function.zig").FnObject;
 const ast = @import("../ast.zig");
 const Value = ast.Value;
@@ -20,14 +21,32 @@ pub const CompileError = error{
 } || ChunkError;
 
 pub const Compiler = struct {
+    module: *Module,
     chunk: *Chunk,
     locals: std.ArrayList(Local),
     scope_depth: u32,
     allocator: std.mem.Allocator,
 
-    pub fn init(chunk: *Chunk, allocator: std.mem.Allocator) Compiler {
+    // Static entry point to compile statements to a Module
+    pub fn compile(statements: []const ast.Statement, allocator: std.mem.Allocator) CompileError!Module {
+        var module = Module.init(allocator);
+        var compiler = Compiler{
+            .module = &module,
+            .chunk = &module.chunk,
+            .locals = .{},
+            .scope_depth = 0,
+            .allocator = allocator,
+        };
+        errdefer compiler.deinit();
+
+        try compiler.compileStatements(statements);
+        return module;
+    }
+
+    pub fn init(module: *Module, allocator: std.mem.Allocator) Compiler {
         return .{
-            .chunk = chunk,
+            .module = module,
+            .chunk = &module.chunk,
             .locals = .{},
             .scope_depth = 0,
             .allocator = allocator,
@@ -67,8 +86,7 @@ pub const Compiler = struct {
     }
 
     fn compileFnDeclarationStatement(self: *Compiler, fn_decl: ast.Statement.FnDeclaration) CompileError!void {
-        var fn_obj = try self.allocator.create(FnObject);
-        fn_obj.* = .{
+        var fn_obj = FnObject{
             .name = fn_decl.name.lexeme,
             .arity = @intCast(fn_decl.params.len),
             .chunk = Chunk.init(self.allocator),
@@ -106,7 +124,8 @@ pub const Compiler = struct {
         self.scope_depth = prev_scope_depth;
 
         // Emit the fn object into the enclosing chunk
-        try self.emitConstant(.{ .vm_object = @ptrCast(fn_obj) }, fn_decl.name.line);
+        const fn_idx = try self.module.addFunction(fn_obj);
+        try self.emitConstant(.{ .vm_function = fn_idx }, fn_decl.name.line);
 
         // Declare the function name as a local (functions are first-class values)
         // If we are the the top-level, store as a global

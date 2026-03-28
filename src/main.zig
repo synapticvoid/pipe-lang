@@ -32,16 +32,12 @@ fn runVm(source: []const u8, allocator: std.mem.Allocator) !void {
     var parser = Parser.init(tokens, allocator);
     const statements = try parser.parse();
 
-    var chunk = bytecode.Chunk.init(allocator);
-    defer chunk.deinit();
+    var module = try bytecode.Compiler.compile(statements, allocator);
+    defer module.deinit();
 
-    var compiler = bytecode.Compiler.init(&chunk, allocator);
-    defer compiler.deinit();
-    try compiler.compileStatements(statements);
-
-    var vm = bytecode.Vm.init(allocator);
+    var vm = bytecode.Vm.init(&module, allocator);
     defer vm.deinit();
-    _ = try vm.run(&chunk);
+    _ = try vm.run();
 }
 
 fn runInterpreter(source: []const u8, ctx: RuntimeContext, allocator: std.mem.Allocator) !void {

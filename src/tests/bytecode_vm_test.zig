@@ -3,6 +3,7 @@ const bytecode = @import("pipe").bytecode;
 const Chunk = bytecode.Chunk;
 const OpCode = bytecode.OpCode;
 const Vm = bytecode.Vm;
+const Module = bytecode.Module;
 const Value = @import("pipe").ast.Value;
 
 // ---------------------------------------------------------------------------
@@ -10,22 +11,32 @@ const Value = @import("pipe").ast.Value;
 // ---------------------------------------------------------------------------
 
 /// Build a chunk, run it, return the last value on the stack (from return).
+/// Takes ownership of the chunk — caller must NOT deinit it.
 fn runChunk(chunk: *Chunk) !Value {
-    var vm = Vm.init(std.testing.allocator);
+    var module = Module.init(std.testing.allocator);
+    defer module.deinit();
+    module.chunk = chunk.*;
+    chunk.* = Chunk.init(std.testing.allocator);
+    var vm = Vm.init(&module, std.testing.allocator);
     defer vm.deinit();
-    return try vm.run(chunk);
+    return try vm.run();
 }
 
 /// Capture print output during VM execution.
+/// Takes ownership of the chunk — caller must NOT deinit it.
 fn runChunkCapturingOutput(chunk: *Chunk) !struct { result: Value, output: []const u8 } {
-    var vm = Vm.init(std.testing.allocator);
+    var module = Module.init(std.testing.allocator);
+    defer module.deinit();
+    module.chunk = chunk.*;
+    chunk.* = Chunk.init(std.testing.allocator);
+    var vm = Vm.init(&module, std.testing.allocator);
     defer vm.deinit();
 
     var buf = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer buf.deinit();
     vm.setOutputWriter(&buf.writer);
 
-    const result = try vm.run(chunk);
+    const result = try vm.run();
     return .{ .result = result, .output = try buf.toOwnedSlice() };
 }
 
