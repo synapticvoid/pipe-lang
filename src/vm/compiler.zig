@@ -1,9 +1,14 @@
 const std = @import("std");
+
 const Chunk = @import("chunk.zig").Chunk;
 const ChunkError = @import("chunk.zig").ChunkError;
 const OpCode = @import("opcode.zig").OpCode;
-const Program = @import("program.zig").Program;
-const FnObject = @import("program.zig").FnObject;
+
+const prg = @import("program.zig");
+const Program = prg.Program;
+const FnObject = prg.FnObject;
+const StructDef = prg.StructDef;
+
 const ast = @import("../ast.zig");
 const Value = @import("value.zig").Value;
 
@@ -15,6 +20,7 @@ const Local = struct {
 
 pub const CompileError = error{
     UnsupportedNode,
+    UndefinedStruct,
     UndefinedVariable,
     TooManyLocals,
     OutOfMemory,
@@ -74,6 +80,7 @@ pub const Compiler = struct {
             },
             .var_declaration => |var_decl| try self.compileVarDeclarationStatement(var_decl),
             .fn_declaration => |fn_decl| try self.compileFnDeclarationStatement(fn_decl),
+            .struct_declaration => |struct_decl| try self.compileStructDeclarationStatement(struct_decl),
             .@"return" => |ret| try self.compileReturnStatement(ret),
             else => return error.UnsupportedNode,
         }
@@ -139,6 +146,30 @@ pub const Compiler = struct {
         }
     }
 
+    fn compileStructDeclarationStatement(self: *Compiler, struct_decl: ast.Statement.StructDeclaration) CompileError!void {
+        // Allocate field names
+        const field_names = try self.allocator.alloc([]const u8, struct_decl.fields.len);
+        for (struct_decl.fields, 0..) |field, i| {
+            field_names[i] = field.name.lexeme;
+        }
+
+        // Allocate body field names
+        const body_field_names = try self.allocator.alloc([]const u8, struct_decl.body_fields.len);
+        for (struct_decl.body_fields, 0..) |field, i| {
+            body_field_names[i] = field.name.lexeme;
+        }
+
+        const struct_obj = StructDef{
+            .name = struct_decl.name.lexeme,
+            .kind = struct_decl.kind,
+            .field_names = field_names,
+            .body_field_names = body_field_names,
+            .body_default_fn = null,
+        };
+
+        _ = try self.program.addStructDef(struct_obj);
+    }
+
     fn compileReturnStatement(self: *Compiler, ret: ast.Statement.Return) CompileError!void {
         if (ret.value) |value| {
             try self.compileExpression(value);
@@ -158,6 +189,9 @@ pub const Compiler = struct {
             .block => |b| try self.compileBlock(b),
             .if_expr => |i| try self.compileIf(i),
             .fn_call => |f| try self.compileFnCall(f),
+            .struct_init => |si| try self.compileStructInit(si),
+            .field_access => |fa| try self.compileFieldAccess(fa),
+            .field_assignment => |fa| try self.compileFieldAssignment(fa),
             else => return error.UnsupportedNode,
         }
     }
@@ -296,6 +330,43 @@ pub const Compiler = struct {
         const line = fn_call.callee.line();
         try self.emitOp(OpCode.call, line);
         try self.emitU8(@intCast(fn_call.args.len), line);
+    }
+
+    fn compileStructInit(self: *Compiler, si: *const ast.Expression.StructInit) CompileError!void {
+        // Search for matching struct name
+        const def_idx: u16 = blk: {
+            for (self.program.struct_defs.items, 0..) |def, i| {
+                if (std.mem.eql(u8, def.name, si.name.lexeme)) {
+                    break :blk @intCast(i);
+                }
+            }
+            return error.UndefinedStruct;
+        };
+        // Compile the arguments
+        for (si.args) |arg| {
+            try self.compileExpression(arg);
+        }
+
+        // Emit construct opcode + struct def index
+        try self.emitOp(OpCode.construct, si.name.line);
+        try self.emitU16(def_idx, si.name.line);
+    }
+
+    fn compileFieldAccess(self: *Compiler, fa: *const ast.Expression.FieldAccess) CompileError!void {
+        try self.compileExpression(fa.object);
+        const name_idx = try self.chunk.addConstant(.{ .string = fa.name.lexeme });
+
+        try self.emitOp(OpCode.get_field, fa.name.line);
+        try self.emitU16(name_idx, fa.name.line);
+    }
+
+    fn compileFieldAssignment(self: *Compiler, fa: *const ast.Expression.FieldAssignment) CompileError!void {
+        try self.compileExpression(fa.object);
+        try self.compileExpression(fa.value);
+        const name_idx = try self.chunk.addConstant(.{ .string = fa.name.lexeme });
+
+        try self.emitOp(OpCode.set_field, fa.name.line);
+        try self.emitU16(name_idx, fa.name.line);
     }
 
     // NOTE: -- Helpers

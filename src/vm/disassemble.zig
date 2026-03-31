@@ -41,6 +41,10 @@ pub fn disassembleInstruction(writer: anytype, chunk: *const Chunk, offset: usiz
     // Print opcode + operand
     const op: OpCode = @enumFromInt(chunk.code.items[offset]);
     switch (op) {
+        // =========================================================================
+        // Constants, Literals, Arithmetic, Logic, and Stack Ops (no operand)
+        // =========================================================================
+
         // No operand
         .add,
         .subtract,
@@ -61,6 +65,11 @@ pub fn disassembleInstruction(writer: anytype, chunk: *const Chunk, offset: usiz
             try writer.print("{s}\n", .{@tagName(op)});
             return offset + 1;
         },
+
+        // =========================================================================
+        // Calls (u8 operand)
+        // =========================================================================
+
         // u8 operand (arity)
         .call => {
             if (offset + 1 >= chunk.code.items.len) {
@@ -74,11 +83,17 @@ pub fn disassembleInstruction(writer: anytype, chunk: *const Chunk, offset: usiz
             return offset + 2;
         },
 
+        // =========================================================================
+        // Constant-pool string/name operands (u16)
+        // =========================================================================
+
         // u16 operand (pool index)
         .constant,
         .get_global,
         .set_global,
         .define_global,
+        .get_field,
+        .set_field,
         => {
             if (offset + 2 >= chunk.code.items.len) {
                 return error.InvalidOffset;
@@ -93,12 +108,17 @@ pub fn disassembleInstruction(writer: anytype, chunk: *const Chunk, offset: usiz
             return offset + 3;
         },
 
+        // =========================================================================
+        // Raw u16 operands (ip targets / slot indices / struct def index)
+        // =========================================================================
+
         // u16 index (stack slot index)
         .jump,
         .jump_if_false,
         .loop,
         .get_local,
         .set_local,
+        .construct,
         => {
             if (offset + 2 >= chunk.code.items.len) {
                 return error.InvalidOffset;

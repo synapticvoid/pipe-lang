@@ -73,6 +73,47 @@ test "disassemble jump opcode" {
     try std.testing.expectEqualStrings("0000 0005 jump 256\n", result);
 }
 
+test "disassemble get_field opcode with constant operand" {
+    var chunk = Chunk.init(std.testing.allocator);
+    defer chunk.deinit();
+
+    const idx = try chunk.addConstant(.{ .int = 7 });
+    try chunk.writeOp(.get_field, 1);
+    try chunk.writeU16(idx, 1);
+
+    const result = try disassembleInstructionToString(&chunk, 0);
+    defer std.testing.allocator.free(result);
+
+    try std.testing.expectEqualStrings("0000 0001 get_field 0 '.{ .int = 7 }'\n", result);
+}
+
+test "disassemble set_field opcode with constant operand" {
+    var chunk = Chunk.init(std.testing.allocator);
+    defer chunk.deinit();
+
+    const idx = try chunk.addConstant(.{ .int = 11 });
+    try chunk.writeOp(.set_field, 1);
+    try chunk.writeU16(idx, 1);
+
+    const result = try disassembleInstructionToString(&chunk, 0);
+    defer std.testing.allocator.free(result);
+
+    try std.testing.expectEqualStrings("0000 0001 set_field 0 '.{ .int = 11 }'\n", result);
+}
+
+test "disassemble construct opcode with raw u16 operand" {
+    var chunk = Chunk.init(std.testing.allocator);
+    defer chunk.deinit();
+
+    try chunk.writeOp(.construct, 3);
+    try chunk.writeU16(5, 3);
+
+    const result = try disassembleInstructionToString(&chunk, 0);
+    defer std.testing.allocator.free(result);
+
+    try std.testing.expectEqualStrings("0000 0003 construct 5\n", result);
+}
+
 test "disassemble full chunk with header" {
     var chunk = Chunk.init(std.testing.allocator);
     defer chunk.deinit();

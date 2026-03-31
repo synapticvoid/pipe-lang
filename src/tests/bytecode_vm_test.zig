@@ -6,6 +6,11 @@ const OpCode = vm_pkg.OpCode;
 const Vm = vm_pkg.Vm;
 const Program = vm_pkg.Program;
 const Value = vm_pkg.Value;
+const StructDef = vm_pkg.StructDef;
+const StructKind = pipe.ast.StructKind;
+const Compiler = vm_pkg.Compiler;
+const ast = pipe.ast;
+const Token = pipe.Token;
 const RuntimeContext = pipe.RuntimeContext;
 
 // ---------------------------------------------------------------------------
@@ -23,6 +28,31 @@ fn runChunk(chunk: *Chunk) !Value {
     defer aw.deinit();
     const ctx = RuntimeContext{ .writer = &aw.writer };
     var vm = Vm.init(&program, ctx, std.testing.allocator);
+    defer vm.deinit();
+    return try vm.run();
+}
+
+/// Run a chunk with pre-registered struct definitions.
+/// Takes ownership of the chunk — caller must NOT deinit it.
+fn runChunkWithStructDefs(chunk: *Chunk, defs: []const StructDef) !Value {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var program = Program.init(allocator);
+    defer program.deinit();
+
+    for (defs) |def| {
+        _ = try program.addStructDef(def);
+    }
+
+    program.chunk = chunk.*;
+    chunk.* = Chunk.init(std.testing.allocator);
+
+    var aw: std.Io.Writer.Allocating = .init(allocator);
+    defer aw.deinit();
+    const ctx = RuntimeContext{ .writer = &aw.writer };
+    var vm = Vm.init(&program, ctx, allocator);
     defer vm.deinit();
     return try vm.run();
 }
@@ -784,4 +814,361 @@ test "loop jumps backward" {
 
     const result = try runChunk(&chunk);
     try std.testing.expect(result.eql(.{ .int = 6 })); // 3 + 2 + 1
+}
+
+// ===========================================================================
+// Step 5: Struct opcodes
+// ===========================================================================
+
+test "construct then get_field returns constructor field" {
+    var chunk = Chunk.init(std.testing.allocator);
+    defer chunk.deinit();
+
+    const c_id = try chunk.addConstant(.{ .int = 7 });
+    const c_name_val = try chunk.addConstant(.{ .string = "Ada" });
+    const c_field_name = try chunk.addConstant(.{ .string = "name" });
+
+    try chunk.writeOp(.constant, 1);
+    try chunk.writeU16(c_id, 1);
+    try chunk.writeOp(.constant, 1);
+    try chunk.writeU16(c_name_val, 1);
+    try chunk.writeOp(.construct, 1);
+    try chunk.writeU16(0, 1);
+    try chunk.writeOp(.get_field, 1);
+    try chunk.writeU16(c_field_name, 1);
+    try chunk.writeOp(.@"return", 1);
+
+    const field_names = [_][]const u8{ "id", "name" };
+    const body_field_names = [_][]const u8{};
+    const defs = [_]StructDef{.{
+        .name = "User",
+        .field_names = field_names[0..],
+        .body_field_names = body_field_names[0..],
+        .kind = StructKind.case,
+        .body_default_fn = null,
+    }};
+
+    const result = try runChunkWithStructDefs(&chunk, defs[0..]);
+    try std.testing.expect(result.eql(.{ .string = "Ada" }));
+}
+
+test "set_field mutates instance field" {
+    var chunk = Chunk.init(std.testing.allocator);
+    defer chunk.deinit();
+
+    const c_id = try chunk.addConstant(.{ .int = 1 });
+    const c_name_initial = try chunk.addConstant(.{ .string = "Alice" });
+    const c_name_updated = try chunk.addConstant(.{ .string = "Bob" });
+    const c_global_name = try chunk.addConstant(.{ .string = "u" });
+    const c_field_name = try chunk.addConstant(.{ .string = "name" });
+
+    try chunk.writeOp(.constant, 1);
+    try chunk.writeU16(c_id, 1);
+    try chunk.writeOp(.constant, 1);
+    try chunk.writeU16(c_name_initial, 1);
+    try chunk.writeOp(.construct, 1);
+    try chunk.writeU16(0, 1);
+
+    try chunk.writeOp(.define_global, 1);
+    try chunk.writeU16(c_global_name, 1);
+
+    try chunk.writeOp(.get_global, 1);
+    try chunk.writeU16(c_global_name, 1);
+    try chunk.writeOp(.constant, 1);
+    try chunk.writeU16(c_name_updated, 1);
+    try chunk.writeOp(.set_field, 1);
+    try chunk.writeU16(c_field_name, 1);
+    try chunk.writeOp(.pop, 1);
+
+    try chunk.writeOp(.get_global, 1);
+    try chunk.writeU16(c_global_name, 1);
+    try chunk.writeOp(.get_field, 1);
+    try chunk.writeU16(c_field_name, 1);
+    try chunk.writeOp(.@"return", 1);
+
+    const field_names = [_][]const u8{ "id", "name" };
+    const body_field_names = [_][]const u8{};
+    const defs = [_]StructDef{.{
+        .name = "User",
+        .field_names = field_names[0..],
+        .body_field_names = body_field_names[0..],
+        .kind = StructKind.plain,
+        .body_default_fn = null,
+    }};
+
+    const result = try runChunkWithStructDefs(&chunk, defs[0..]);
+    try std.testing.expect(result.eql(.{ .string = "Bob" }));
+}
+
+test "get_field on missing name is UndefinedField" {
+    var chunk = Chunk.init(std.testing.allocator);
+    defer chunk.deinit();
+
+    const c_id = try chunk.addConstant(.{ .int = 1 });
+    const c_name_val = try chunk.addConstant(.{ .string = "Alice" });
+    const c_missing_field = try chunk.addConstant(.{ .string = "email" });
+
+    try chunk.writeOp(.constant, 1);
+    try chunk.writeU16(c_id, 1);
+    try chunk.writeOp(.constant, 1);
+    try chunk.writeU16(c_name_val, 1);
+    try chunk.writeOp(.construct, 1);
+    try chunk.writeU16(0, 1);
+    try chunk.writeOp(.get_field, 1);
+    try chunk.writeU16(c_missing_field, 1);
+    try chunk.writeOp(.@"return", 1);
+
+    const field_names = [_][]const u8{ "id", "name" };
+    const body_field_names = [_][]const u8{};
+    const defs = [_]StructDef{.{
+        .name = "User",
+        .field_names = field_names[0..],
+        .body_field_names = body_field_names[0..],
+        .kind = StructKind.plain,
+        .body_default_fn = null,
+    }};
+
+    try std.testing.expectError(error.UndefinedField, runChunkWithStructDefs(&chunk, defs[0..]));
+}
+
+test "get_field on non-struct is TypeError" {
+    var chunk = Chunk.init(std.testing.allocator);
+    defer chunk.deinit();
+
+    const c_num = try chunk.addConstant(.{ .int = 123 });
+    const c_field_name = try chunk.addConstant(.{ .string = "name" });
+
+    try chunk.writeOp(.constant, 1);
+    try chunk.writeU16(c_num, 1);
+    try chunk.writeOp(.get_field, 1);
+    try chunk.writeU16(c_field_name, 1);
+    try chunk.writeOp(.@"return", 1);
+
+    try std.testing.expectError(error.TypeError, runChunk(&chunk));
+}
+
+// ===========================================================================
+// Step 6: Compiler struct tests
+// ===========================================================================
+
+/// Helper token with .identifier type.
+fn ident(lexeme: []const u8) Token {
+    return .{ .type = .identifier, .lexeme = lexeme, .line = 1 };
+}
+
+/// Dummy type annotation (compiler ignores it for struct fields).
+fn dummyType() ast.PipeTypeAnnotation {
+    return .{ .named = ident("Int") };
+}
+
+/// Run a series of statements through the compiler, then compile+return a
+/// final expression, and execute the result with the VM.
+fn runCompiled(
+    allocator: std.mem.Allocator,
+    statements: []const ast.Statement,
+    final_expr: ast.Expression,
+) !Value {
+    var program = Program.init(allocator);
+    defer program.deinit();
+
+    var compiler = Compiler.init(&program, allocator);
+    defer compiler.deinit();
+
+    for (statements) |stmt| {
+        try compiler.compileStatement(stmt);
+    }
+    try compiler.compileExpression(final_expr);
+    try compiler.emitReturn(1);
+
+    var aw: std.Io.Writer.Allocating = .init(allocator);
+    defer aw.deinit();
+    const ctx = RuntimeContext{ .writer = &aw.writer };
+    var vm = Vm.init(&program, ctx, allocator);
+    defer vm.deinit();
+    return try vm.run();
+}
+
+test "compiler: struct declaration and construction roundtrip" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    // struct User(id: Int, name: Str);
+    const fields = [_]ast.Statement.FieldDeclaration{
+        .{ .name = ident("id"), .type_annotation = dummyType(), .mutability = .constant, .default_value = null },
+        .{ .name = ident("name"), .type_annotation = dummyType(), .mutability = .constant, .default_value = null },
+    };
+    const struct_decl = ast.Statement{ .struct_declaration = .{
+        .name = ident("User"),
+        .fields = fields[0..],
+        .body_fields = &.{},
+        .kind = .case,
+        .methods = &.{},
+    } };
+
+    // User(7, "Ada")
+    const args = [_]ast.Expression{
+        .{ .literal = .{ .token = ident("7"), .value = .{ .int = 7 } } },
+        .{ .literal = .{ .token = ident("Ada"), .value = .{ .string = "Ada" } } },
+    };
+    const si = try allocator.create(ast.Expression.StructInit);
+    si.* = .{ .name = ident("User"), .args = args[0..] };
+
+    const result = try runCompiled(allocator, &.{struct_decl}, .{ .struct_init = si });
+    try std.testing.expect(result == .struct_instance);
+    try std.testing.expectEqualStrings("User", result.struct_instance.type_name);
+}
+
+test "compiler: field access on constructed instance" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    // struct User(id: Int, name: Str);
+    const fields = [_]ast.Statement.FieldDeclaration{
+        .{ .name = ident("id"), .type_annotation = dummyType(), .mutability = .constant, .default_value = null },
+        .{ .name = ident("name"), .type_annotation = dummyType(), .mutability = .constant, .default_value = null },
+    };
+    const struct_decl = ast.Statement{ .struct_declaration = .{
+        .name = ident("User"),
+        .fields = fields[0..],
+        .body_fields = &.{},
+        .kind = .case,
+        .methods = &.{},
+    } };
+
+    // var u = User(7, "Ada");
+    const args = [_]ast.Expression{
+        .{ .literal = .{ .token = ident("7"), .value = .{ .int = 7 } } },
+        .{ .literal = .{ .token = ident("Ada"), .value = .{ .string = "Ada" } } },
+    };
+    const si = try allocator.create(ast.Expression.StructInit);
+    si.* = .{ .name = ident("User"), .args = args[0..] };
+    const var_decl = ast.Statement{ .var_declaration = .{
+        .name = ident("u"),
+        .type_annotation = null,
+        .initializer = .{ .struct_init = si },
+        .mutability = .constant,
+    } };
+
+    // u.name
+    const fa = try allocator.create(ast.Expression.FieldAccess);
+    fa.* = .{ .object = .{ .variable = .{ .token = ident("u") } }, .name = ident("name") };
+
+    const result = try runCompiled(allocator, &.{ struct_decl, var_decl }, .{ .field_access = fa });
+    try std.testing.expect(result.eql(.{ .string = "Ada" }));
+}
+
+test "compiler: field assignment and re-read" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    // struct User(id: Int, name: Str);
+    const fields = [_]ast.Statement.FieldDeclaration{
+        .{ .name = ident("id"), .type_annotation = dummyType(), .mutability = .constant, .default_value = null },
+        .{ .name = ident("name"), .type_annotation = dummyType(), .mutability = .mutable, .default_value = null },
+    };
+    const struct_decl = ast.Statement{ .struct_declaration = .{
+        .name = ident("User"),
+        .fields = fields[0..],
+        .body_fields = &.{},
+        .kind = .plain,
+        .methods = &.{},
+    } };
+
+    // var u = User(1, "Alice");
+    const init_args = [_]ast.Expression{
+        .{ .literal = .{ .token = ident("1"), .value = .{ .int = 1 } } },
+        .{ .literal = .{ .token = ident("Alice"), .value = .{ .string = "Alice" } } },
+    };
+    const si = try allocator.create(ast.Expression.StructInit);
+    si.* = .{ .name = ident("User"), .args = init_args[0..] };
+    const var_decl = ast.Statement{ .var_declaration = .{
+        .name = ident("u"),
+        .type_annotation = null,
+        .initializer = .{ .struct_init = si },
+        .mutability = .mutable,
+    } };
+
+    // u.name = "Bob"  (expression statement)
+    const assign = try allocator.create(ast.Expression.FieldAssignment);
+    assign.* = .{
+        .object = .{ .variable = .{ .token = ident("u") } },
+        .name = ident("name"),
+        .value = .{ .literal = .{ .token = ident("Bob"), .value = .{ .string = "Bob" } } },
+    };
+    const assign_stmt = ast.Statement{ .expression = .{ .field_assignment = assign } };
+
+    // u.name
+    const fa = try allocator.create(ast.Expression.FieldAccess);
+    fa.* = .{ .object = .{ .variable = .{ .token = ident("u") } }, .name = ident("name") };
+
+    const result = try runCompiled(allocator, &.{ struct_decl, var_decl, assign_stmt }, .{ .field_access = fa });
+    try std.testing.expect(result.eql(.{ .string = "Bob" }));
+}
+
+test "compiler: nested field access a.b.c" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    // struct Point(x: Int);
+    const point_fields = [_]ast.Statement.FieldDeclaration{
+        .{ .name = ident("x"), .type_annotation = dummyType(), .mutability = .constant, .default_value = null },
+    };
+    const point_decl = ast.Statement{ .struct_declaration = .{
+        .name = ident("Point"),
+        .fields = point_fields[0..],
+        .body_fields = &.{},
+        .kind = .case,
+        .methods = &.{},
+    } };
+
+    // struct Line(start: Point);
+    const line_fields = [_]ast.Statement.FieldDeclaration{
+        .{ .name = ident("start"), .type_annotation = dummyType(), .mutability = .constant, .default_value = null },
+    };
+    const line_decl = ast.Statement{ .struct_declaration = .{
+        .name = ident("Line"),
+        .fields = line_fields[0..],
+        .body_fields = &.{},
+        .kind = .case,
+        .methods = &.{},
+    } };
+
+    // var p = Point(3);
+    const p_args = [_]ast.Expression{
+        .{ .literal = .{ .token = ident("3"), .value = .{ .int = 3 } } },
+    };
+    const p_si = try allocator.create(ast.Expression.StructInit);
+    p_si.* = .{ .name = ident("Point"), .args = p_args[0..] };
+    const p_decl = ast.Statement{ .var_declaration = .{
+        .name = ident("p"),
+        .type_annotation = null,
+        .initializer = .{ .struct_init = p_si },
+        .mutability = .constant,
+    } };
+
+    // var l = Line(p);
+    const l_args = [_]ast.Expression{
+        .{ .variable = .{ .token = ident("p") } },
+    };
+    const l_si = try allocator.create(ast.Expression.StructInit);
+    l_si.* = .{ .name = ident("Line"), .args = l_args[0..] };
+    const l_decl = ast.Statement{ .var_declaration = .{
+        .name = ident("l"),
+        .type_annotation = null,
+        .initializer = .{ .struct_init = l_si },
+        .mutability = .constant,
+    } };
+
+    // l.start.x
+    const fa_start = try allocator.create(ast.Expression.FieldAccess);
+    fa_start.* = .{ .object = .{ .variable = .{ .token = ident("l") } }, .name = ident("start") };
+    const fa_x = try allocator.create(ast.Expression.FieldAccess);
+    fa_x.* = .{ .object = .{ .field_access = fa_start }, .name = ident("x") };
+
+    const result = try runCompiled(allocator, &.{ point_decl, line_decl, p_decl, l_decl }, .{ .field_access = fa_x });
+    try std.testing.expect(result.eql(.{ .int = 3 }));
 }

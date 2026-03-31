@@ -10,6 +10,7 @@ pub const VmError = error{
     DivisionByZero,
     TypeError, // wrong types for arithmetic/negate/table
     UndefinedVariable,
+    UndefinedField,
     ArityMismatch,
     NotCallable, // Not a function/method that we can call
 };
@@ -241,6 +242,80 @@ pub const Vm = struct {
                         else => return error.NotCallable,
                     }
                 },
+                .get_field => {
+                    // Get field metadata
+                    const field_idx = readU16(frame.chunk, &frame.ip);
+                    const field_name = try getFieldNameFromConst(frame.chunk, field_idx);
+
+                    // Get instance
+                    const instance = switch (self.pop()) {
+                        .struct_instance => |si| si,
+                        else => return error.TypeError,
+                    };
+
+                    // Get field value
+                    const field_meta = findField(instance, field_name) orelse return error.UndefinedField;
+                    const field_value = if (field_meta.is_body)
+                        instance.body_field_values[field_meta.index]
+                    else
+                        instance.field_values[field_meta.index];
+
+                    self.push(field_value);
+                },
+                .set_field => {
+                    // Get struct
+                    const field_idx = readU16(frame.chunk, &frame.ip);
+                    const field_name = try getFieldNameFromConst(frame.chunk, field_idx);
+
+                    // Pop value
+                    const value = self.pop();
+
+                    // Pop instance
+                    const instance = switch (self.pop()) {
+                        .struct_instance => |si| si,
+                        else => return error.TypeError,
+                    };
+
+                    const field_meta = findField(instance, field_name) orelse return error.UndefinedField;
+                    if (field_meta.is_body)
+                        instance.body_field_values[field_meta.index] = value
+                    else
+                        instance.field_values[field_meta.index] = value;
+
+                    self.push(value);
+                },
+                .construct => {
+                    const struct_def_idx = readU16(frame.chunk, &frame.ip);
+                    const def = self.program.struct_defs.items[struct_def_idx];
+
+                    // Allocate field values
+                    const field_values = try self.allocator.alloc(Value, def.field_names.len);
+                    var i = def.field_names.len;
+                    while (i > 0) {
+                        i -= 1;
+                        field_values[i] = self.pop();
+                    }
+
+                    // Allocate body field values
+                    const body_field_values = try self.allocator.alloc(Value, def.body_field_names.len);
+                    i = def.body_field_names.len;
+                    while (i > 0) {
+                        i -= 1;
+                        body_field_values[i] = Value.unit;
+                    }
+
+                    // Create a push field instance
+                    const instance = try self.allocator.create(Value.StructInstance);
+                    instance.* = .{
+                        .type_name = def.name,
+                        .field_names = def.field_names,
+                        .body_field_names = def.body_field_names,
+                        .field_values = field_values,
+                        .body_field_values = body_field_values,
+                        .kind = def.kind,
+                    };
+                    self.push(.{ .struct_instance = instance });
+                },
             }
         }
 
@@ -279,6 +354,32 @@ pub const Vm = struct {
         ip.* += 2;
 
         return @as(u16, hi) << 8 | lo;
+    }
+
+    // Returns the field name from the constant pool
+    fn getFieldNameFromConst(chunk: *const Chunk, idx: u16) VmError![]const u8 {
+        const name = chunk.constants.items[idx];
+        return switch (name) {
+            .string => |s| s,
+            else => error.UndefinedField,
+        };
+    }
+
+    // Returns the field's metadata from its name
+    fn findField(si: *Value.StructInstance, name: []const u8) ?struct { is_body: bool, index: usize } {
+        for (si.field_names, 0..) |field_name, i| {
+            if (std.mem.eql(u8, field_name, name)) {
+                return .{ .is_body = false, .index = i };
+            }
+        }
+
+        for (si.body_field_names, 0..) |body_name, i| {
+            if (std.mem.eql(u8, body_name, name)) {
+                return .{ .is_body = true, .index = i };
+            }
+        }
+
+        return null;
     }
 
     // Returns the current call frame
