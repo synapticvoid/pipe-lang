@@ -85,6 +85,11 @@ pub const Vm = struct {
         return self.execute();
     }
 
+    const ReturnAction = union(enum) {
+        done: Value,
+        new_frame: *CallFrame,
+    };
+
     fn execute(self: *Vm) !Value {
         // Hoist the frame pointer out of the loop; reload only on call/return when the active frame changes.
         var frame = self.currentFrame();
@@ -94,360 +99,406 @@ pub const Vm = struct {
             frame.ip += 1;
 
             switch (op) {
-                // =============================================================
                 // Constants and Literals
-                // =============================================================
-
-                .constant => {
-                    const idx = readU16(frame.chunk, &frame.ip);
-                    self.push(frame.chunk.constants.items[idx]);
-                },
-                .add, .subtract, .multiply, .divide => {
-                    const b = self.pop(); // right
-                    const a = self.pop(); // left
-
-                    std.debug.assert(a.isNumber() and b.isNumber());
-
-                    self.push(.{ .int = switch (op) {
-                        .add => a.int + b.int,
-                        .subtract => a.int - b.int,
-                        .multiply => a.int * b.int,
-                        .divide => if (b.int == 0) return error.DivisionByZero else @divTrunc(a.int, b.int),
-                        else => unreachable,
-                    } });
-                },
-                .negate => {
-                    const val = self.pop();
-                    if (!val.isNumber()) {
-                        return VmError.TypeError;
-                    }
-
-                    self.push(switch (val) {
-                        .int => |n| .{ .int = -n },
-                        else => unreachable,
-                    });
-                },
-                .not => {
-                    const val = self.pop();
-                    self.push(.{ .boolean = !val.isTruthy() });
-                },
+                .constant => self.executeConstant(frame),
+                .add, .subtract, .multiply, .divide => try self.executeBinaryArith(op),
+                .negate => try self.executeNegate(),
+                .not => self.executeNot(),
                 .equal => {
-                    // Peek at top stack to check if the operands are structs
-                    const a = self.stack[self.stack_top - 2];
-                    const b = self.stack[self.stack_top - 1];
-
-                    if (a == .struct_instance and b == .struct_instance) {
-                        // Both are structs, look for Typename.equals on the left operand
-                        // Fallback to == if not found
-                        if (try self.findSpecialMethod(a.struct_instance.type_name, types.METHOD_EQUALS)) |method_idx| {
-                            const fn_obj = &self.program.functions.items[method_idx];
-
-                            // left is already at slot 0, right at slot 1
-                            const base_slot = self.stack_top - 2;
-                            self.frames[self.frame_count] = .{
-                                .chunk = &fn_obj.chunk,
-                                .ip = 0,
-                                .base_slot = base_slot,
-                                .fn_index = method_idx,
-                            };
-                            self.frame_count += 1;
-                            frame = self.currentFrame();
-                            continue;
-                        }
-
-                        self.stack_top -= 2;
-                        self.push(.{ .boolean = a.eql(b) });
+                    if (try self.executeEqual()) |new_frame| {
+                        frame = new_frame;
                         continue;
                     }
-
-                    // Not structs, use values already peaked
-                    _ = self.pop();
-                    _ = self.pop();
-                    self.push(.{ .boolean = a.eql(b) });
                 },
-                .greater, .less => {
-                    const b = self.pop();
-                    const a = self.pop();
-
-                    std.debug.assert(a.isNumber() and b.isNumber());
-
-                    self.push(.{ .boolean = switch (op) {
-                        .greater => a.int > b.int,
-                        .less => a.int < b.int,
-                        else => unreachable,
-                    } });
-                },
+                .greater, .less => self.executeComparison(op),
                 .true => self.push(.{ .boolean = true }),
                 .false => self.push(.{ .boolean = false }),
                 .null => self.push(.null),
                 .unit => self.push(.unit),
 
-                // =============================================================
                 // Stack and Control Flow
-                // =============================================================
-
                 .pop => _ = self.pop(),
-                .jump => frame.ip = readU16(frame.chunk, &frame.ip),
-                .jump_if_false => {
-                    const offset = readU16(frame.chunk, &frame.ip);
-                    const condition = self.pop();
-                    if (!condition.isTruthy()) {
-                        frame.ip = offset;
-                    }
-                },
-                .loop => frame.ip = readU16(frame.chunk, &frame.ip),
-                .match_variant => {
-                    const name_idx = readU16(frame.chunk, &frame.ip);
-                    const fail_jump = readU16(frame.chunk, &frame.ip);
-                    const variant_name = try getFieldNameFromConst(frame.chunk, name_idx);
-
-                    const top = self.stack[self.stack_top - 1];
-                    if (top == .struct_instance) {
-                        const type_name = top.struct_instance.type_name;
-                        if (utils.isVariant(type_name, variant_name)) {
-                            // MATCH: replace TOS with unwrapped value (Ok.value)
-                            self.stack[self.stack_top - 1] = top.struct_instance.field_values[0];
-                        } else {
-                            frame.ip = fail_jump;
-                        }
-                    } else {
-                        frame.ip = fail_jump;
-                    }
-                },
+                .jump => self.executeJump(frame),
+                .jump_if_false => self.executeJumpIfFalse(frame),
+                .loop => self.executeLoop(frame),
+                .match_variant => try self.executeMatchVariant(frame),
                 .@"return" => {
-                    const ret_value = if (self.stack_top > frame.base_slot)
-                        self.pop()
-                    else
-                        Value.unit;
-
-                    self.stack_top = frame.base_slot;
-                    self.frame_count -= 1;
-
-                    if (self.frame_count == 0) {
-                        return ret_value;
+                    switch (try self.executeReturn(frame)) {
+                        .done => |val| return val,
+                        .new_frame => |new_frame| frame = new_frame,
                     }
-
-                    // Wrap if fallible, otherwise pass through
-                    const final_value = if (frame.fn_index) |fn_index| blk: {
-                        const function = self.program.functions.items[fn_index];
-                        if (function.result_name) |name| {
-                            break :blk try self.wrapResult(ret_value, name);
-                        }
-                        break :blk ret_value;
-                    } else ret_value;
-
-                    self.push(final_value);
-                    frame = self.currentFrame();
                 },
 
-                // =============================================================
                 // Variables
-                // =============================================================
+                .get_local => self.executeGetLocal(frame),
+                .set_local => self.executeSetLocal(frame),
+                .get_global => try self.executeGetGlobal(frame),
+                .set_global => try self.executeSetGlobal(frame),
+                .define_global => try self.executeDefineGlobal(frame),
 
-                .get_local => {
-                    const idx = frame.base_slot + readU16(frame.chunk, &frame.ip);
-                    self.push(self.stack[idx]);
-                },
-                .set_local => {
-                    const idx = frame.base_slot + readU16(frame.chunk, &frame.ip);
-                    self.stack[idx] = self.stack[self.stack_top - 1];
-                },
-                .get_global => {
-                    const idx = readU16(frame.chunk, &frame.ip);
-                    const val = self.globals.get(frame.chunk.constants.items[idx].string) orelse return error.UndefinedVariable;
-                    self.push(val);
-                },
-                .set_global => {
-                    const idx = readU16(frame.chunk, &frame.ip);
-                    const name = frame.chunk.constants.items[idx].string;
-
-                    if (self.globals.getPtr(name)) |ptr| {
-                        ptr.* = self.stack[self.stack_top - 1];
-                    } else {
-                        return error.UndefinedVariable;
-                    }
-                },
-                .define_global => {
-                    const idx = readU16(frame.chunk, &frame.ip);
-                    const name = frame.chunk.constants.items[idx].string;
-
-                    const val = self.pop();
-                    try self.globals.put(self.allocator, name, val);
-                },
-
-                // =============================================================
                 // Calls and Structs
-                // =============================================================
-
                 .call => {
-                    const arity = readU8(frame.chunk, &frame.ip);
-                    const base_slot = self.stack_top - 1 - arity;
-                    const callee = self.stack[base_slot];
-
-                    switch (callee) {
-                        .function => {
-                            const fn_obj: *const FnObject = &self.program.functions.items[callee.function];
-
-                            if (fn_obj.arity != arity) {
-                                return error.ArityMismatch;
-                            }
-
-                            self.frames[self.frame_count] = .{
-                                .chunk = &fn_obj.chunk,
-                                .ip = 0,
-                                .base_slot = base_slot,
-                                .fn_index = callee.function,
-                            };
-                            self.frame_count += 1;
-                            frame = self.currentFrame();
-                        },
-                        .native => {
-                            const arg0_idx = base_slot + 1;
-                            const args = self.stack[arg0_idx .. arg0_idx + arity];
-
-                            const ret_value = callee.native.func(args, self.ctx);
-                            self.stack_top = base_slot;
-                            self.push(ret_value);
-                        },
-                        .struct_constructor => {
-                            const struct_def_idx = callee.struct_constructor;
-                            const def = self.program.struct_defs.items[struct_def_idx];
-
-                            if (def.field_names.len != arity) {
-                                return error.ArityMismatch;
-                            }
-
-                            const arg0_idx = base_slot + 1;
-                            const args = self.stack[arg0_idx .. arg0_idx + def.field_names.len];
-                            var field_values = try self.allocator.alloc(Value, args.len);
-                            for (args, 0..) |arg, i| {
-                                field_values[i] = arg;
-                            }
-
-                            const body_field_values = try self.allocator.alloc(Value, def.body_field_names.len);
-                            for (body_field_values) |*v| {
-                                v.* = Value.unit;
-                            }
-
-                            const instance = try self.allocator.create(Value.StructInstance);
-                            instance.* = .{
-                                .type_name = def.name,
-                                .field_names = def.field_names,
-                                .body_field_names = def.body_field_names,
-                                .field_values = field_values,
-                                .body_field_values = body_field_values,
-                                .kind = def.kind,
-                            };
-
-                            self.stack_top = base_slot;
-                            self.push(Value{ .struct_instance = instance });
-                        },
-                        .bound_method => |bm| {
-                            const fn_obj: *const FnObject = &self.program.functions.items[bm.fn_idx];
-
-                            // - 1 because self is the first param, but we don't count it in the call-site arity
-                            if (fn_obj.arity - 1 != arity) {
-                                return error.ArityMismatch;
-                            }
-
-                            self.stack[base_slot] = .{ .struct_instance = bm.receiver };
-                            self.frames[self.frame_count] = .{
-                                .chunk = &fn_obj.chunk,
-                                .ip = 0,
-                                .base_slot = base_slot,
-                                .fn_index = bm.fn_idx,
-                            };
-                            self.frame_count += 1;
-                            frame = self.currentFrame();
-                        },
-                        else => return error.NotCallable,
+                    if (try self.executeCall(frame)) |new_frame| {
+                        frame = new_frame;
                     }
                 },
-                .get_field => {
-                    const field_idx = readU16(frame.chunk, &frame.ip);
-                    const field_name = try getFieldNameFromConst(frame.chunk, field_idx);
-
-                    const instance = switch (self.pop()) {
-                        .struct_instance => |si| si,
-                        else => return error.TypeError,
-                    };
-
-                    const field_meta = findField(instance, field_name);
-                    if (field_meta) |meta| {
-                        const field_value = if (meta.is_body)
-                            instance.body_field_values[meta.index]
-                        else
-                            instance.field_values[meta.index];
-
-                        self.push(field_value);
-                    } else {
-                        // Build the qualified name to search for a bound method
-                        const qualified = try utils.memberName(self.allocator, instance.type_name, field_name);
-                        defer self.allocator.free(qualified);
-
-                        const val = self.globals.get(qualified) orelse return error.UndefinedField;
-                        if (val != .function) {
-                            return error.NotCallable;
-                        }
-
-                        self.push(.{ .bound_method = .{
-                            .fn_idx = val.function,
-                            .receiver = instance,
-                        } });
-                    }
-                },
-                .set_field => {
-                    const field_idx = readU16(frame.chunk, &frame.ip);
-                    const field_name = try getFieldNameFromConst(frame.chunk, field_idx);
-
-                    const value = self.pop();
-
-                    const instance = switch (self.pop()) {
-                        .struct_instance => |si| si,
-                        else => return error.TypeError,
-                    };
-
-                    const field_meta = findField(instance, field_name) orelse return error.UndefinedField;
-                    if (field_meta.is_body)
-                        instance.body_field_values[field_meta.index] = value
-                    else
-                        instance.field_values[field_meta.index] = value;
-
-                    self.push(value);
-                },
-                .construct => {
-                    const struct_def_idx = readU16(frame.chunk, &frame.ip);
-                    const def = self.program.struct_defs.items[struct_def_idx];
-
-                    const field_values = try self.allocator.alloc(Value, def.field_names.len);
-                    var i = def.field_names.len;
-                    while (i > 0) {
-                        i -= 1;
-                        field_values[i] = self.pop();
-                    }
-
-                    const body_field_values = try self.allocator.alloc(Value, def.body_field_names.len);
-                    i = def.body_field_names.len;
-                    while (i > 0) {
-                        i -= 1;
-                        body_field_values[i] = Value.unit;
-                    }
-
-                    const instance = try self.allocator.create(Value.StructInstance);
-                    instance.* = .{
-                        .type_name = def.name,
-                        .field_names = def.field_names,
-                        .body_field_names = def.body_field_names,
-                        .field_values = field_values,
-                        .body_field_values = body_field_values,
-                        .kind = def.kind,
-                    };
-                    self.push(.{ .struct_instance = instance });
-                },
+                .get_field => try self.executeGetField(frame),
+                .set_field => try self.executeSetField(frame),
+                .construct => try self.executeConstruct(frame),
             }
         }
 
         return .unit;
+    }
+
+    // NOTE: -- Opcode handlers
+
+    inline fn executeConstant(self: *Vm, frame: *CallFrame) void {
+        const idx = readU16(frame.chunk, &frame.ip);
+        self.push(frame.chunk.constants.items[idx]);
+    }
+
+    inline fn executeBinaryArith(self: *Vm, op: OpCode) VmError!void {
+        const b = self.pop();
+        const a = self.pop();
+
+        std.debug.assert(a.isNumber() and b.isNumber());
+
+        self.push(.{ .int = switch (op) {
+            .add => a.int + b.int,
+            .subtract => a.int - b.int,
+            .multiply => a.int * b.int,
+            .divide => if (b.int == 0) return error.DivisionByZero else @divTrunc(a.int, b.int),
+            else => unreachable,
+        } });
+    }
+
+    inline fn executeNegate(self: *Vm) VmError!void {
+        const val = self.pop();
+        if (!val.isNumber()) {
+            return VmError.TypeError;
+        }
+
+        self.push(switch (val) {
+            .int => |n| .{ .int = -n },
+            else => unreachable,
+        });
+    }
+
+    inline fn executeNot(self: *Vm) void {
+        const val = self.pop();
+        self.push(.{ .boolean = !val.isTruthy() });
+    }
+
+    // Returns a new frame pointer if the active frame changed (struct equals dispatch),
+    // null if the comparison was handled inline.
+    inline fn executeEqual(self: *Vm) !?*CallFrame {
+        const a = self.stack[self.stack_top - 2];
+        const b = self.stack[self.stack_top - 1];
+
+        if (a == .struct_instance and b == .struct_instance) {
+            if (try self.findSpecialMethod(a.struct_instance.type_name, types.METHOD_EQUALS)) |method_idx| {
+                const fn_obj = &self.program.functions.items[method_idx];
+
+                const base_slot = self.stack_top - 2;
+                self.frames[self.frame_count] = .{
+                    .chunk = &fn_obj.chunk,
+                    .ip = 0,
+                    .base_slot = base_slot,
+                    .fn_index = method_idx,
+                };
+                self.frame_count += 1;
+                return self.currentFrame();
+            }
+
+            self.stack_top -= 2;
+            self.push(.{ .boolean = a.eql(b) });
+            return null;
+        }
+
+        _ = self.pop();
+        _ = self.pop();
+        self.push(.{ .boolean = a.eql(b) });
+        return null;
+    }
+
+    inline fn executeComparison(self: *Vm, op: OpCode) void {
+        const b = self.pop();
+        const a = self.pop();
+
+        std.debug.assert(a.isNumber() and b.isNumber());
+
+        self.push(.{ .boolean = switch (op) {
+            .greater => a.int > b.int,
+            .less => a.int < b.int,
+            else => unreachable,
+        } });
+    }
+
+    inline fn executeJump(_: *Vm, frame: *CallFrame) void {
+        frame.ip = readU16(frame.chunk, &frame.ip);
+    }
+
+    inline fn executeJumpIfFalse(self: *Vm, frame: *CallFrame) void {
+        const offset = readU16(frame.chunk, &frame.ip);
+        const condition = self.pop();
+        if (!condition.isTruthy()) {
+            frame.ip = offset;
+        }
+    }
+
+    inline fn executeLoop(_: *Vm, frame: *CallFrame) void {
+        frame.ip = readU16(frame.chunk, &frame.ip);
+    }
+
+    inline fn executeMatchVariant(self: *Vm, frame: *CallFrame) VmError!void {
+        const name_idx = readU16(frame.chunk, &frame.ip);
+        const fail_jump = readU16(frame.chunk, &frame.ip);
+        const variant_name = try getFieldNameFromConst(frame.chunk, name_idx);
+
+        const top = self.stack[self.stack_top - 1];
+        if (top == .struct_instance) {
+            const type_name = top.struct_instance.type_name;
+            if (utils.isVariant(type_name, variant_name)) {
+                self.stack[self.stack_top - 1] = top.struct_instance.field_values[0];
+            } else {
+                frame.ip = fail_jump;
+            }
+        } else {
+            frame.ip = fail_jump;
+        }
+    }
+
+    inline fn executeReturn(self: *Vm, frame: *CallFrame) VmError!ReturnAction {
+        const ret_value = if (self.stack_top > frame.base_slot)
+            self.pop()
+        else
+            Value.unit;
+
+        self.stack_top = frame.base_slot;
+        self.frame_count -= 1;
+
+        if (self.frame_count == 0) {
+            return .{ .done = ret_value };
+        }
+
+        const final_value = if (frame.fn_index) |fn_index| blk: {
+            const function = self.program.functions.items[fn_index];
+            if (function.result_name) |name| {
+                break :blk try self.wrapResult(ret_value, name);
+            }
+            break :blk ret_value;
+        } else ret_value;
+
+        self.push(final_value);
+        return .{ .new_frame = self.currentFrame() };
+    }
+
+    inline fn executeGetLocal(self: *Vm, frame: *CallFrame) void {
+        const idx = frame.base_slot + readU16(frame.chunk, &frame.ip);
+        self.push(self.stack[idx]);
+    }
+
+    inline fn executeSetLocal(self: *Vm, frame: *CallFrame) void {
+        const idx = frame.base_slot + readU16(frame.chunk, &frame.ip);
+        self.stack[idx] = self.stack[self.stack_top - 1];
+    }
+
+    inline fn executeGetGlobal(self: *Vm, frame: *CallFrame) VmError!void {
+        const idx = readU16(frame.chunk, &frame.ip);
+        const val = self.globals.get(frame.chunk.constants.items[idx].string) orelse return error.UndefinedVariable;
+        self.push(val);
+    }
+
+    inline fn executeSetGlobal(self: *Vm, frame: *CallFrame) VmError!void {
+        const idx = readU16(frame.chunk, &frame.ip);
+        const name = frame.chunk.constants.items[idx].string;
+
+        if (self.globals.getPtr(name)) |ptr| {
+            ptr.* = self.stack[self.stack_top - 1];
+        } else {
+            return error.UndefinedVariable;
+        }
+    }
+
+    inline fn executeDefineGlobal(self: *Vm, frame: *CallFrame) VmError!void {
+        const idx = readU16(frame.chunk, &frame.ip);
+        const name = frame.chunk.constants.items[idx].string;
+
+        const val = self.pop();
+        try self.globals.put(self.allocator, name, val);
+    }
+
+    // Returns a new frame pointer if calling a function/bound_method,
+    // null for natives and struct constructors (handled inline).
+    inline fn executeCall(self: *Vm, frame: *CallFrame) VmError!?*CallFrame {
+        const arity = readU8(frame.chunk, &frame.ip);
+        const base_slot = self.stack_top - 1 - arity;
+        const callee = self.stack[base_slot];
+
+        switch (callee) {
+            .function => {
+                const fn_obj: *const FnObject = &self.program.functions.items[callee.function];
+
+                if (fn_obj.arity != arity) {
+                    return error.ArityMismatch;
+                }
+
+                self.frames[self.frame_count] = .{
+                    .chunk = &fn_obj.chunk,
+                    .ip = 0,
+                    .base_slot = base_slot,
+                    .fn_index = callee.function,
+                };
+                self.frame_count += 1;
+                return self.currentFrame();
+            },
+            .native => {
+                const arg0_idx = base_slot + 1;
+                const args = self.stack[arg0_idx .. arg0_idx + arity];
+
+                const ret_value = callee.native.func(args, self.ctx);
+                self.stack_top = base_slot;
+                self.push(ret_value);
+                return null;
+            },
+            .struct_constructor => {
+                const struct_def_idx = callee.struct_constructor;
+                const def = self.program.struct_defs.items[struct_def_idx];
+
+                if (def.field_names.len != arity) {
+                    return error.ArityMismatch;
+                }
+
+                const arg0_idx = base_slot + 1;
+                const args = self.stack[arg0_idx .. arg0_idx + def.field_names.len];
+                var field_values = try self.allocator.alloc(Value, args.len);
+                for (args, 0..) |arg, i| {
+                    field_values[i] = arg;
+                }
+
+                const body_field_values = try self.allocator.alloc(Value, def.body_field_names.len);
+                for (body_field_values) |*v| {
+                    v.* = Value.unit;
+                }
+
+                const instance = try self.allocator.create(Value.StructInstance);
+                instance.* = .{
+                    .type_name = def.name,
+                    .field_names = def.field_names,
+                    .body_field_names = def.body_field_names,
+                    .field_values = field_values,
+                    .body_field_values = body_field_values,
+                    .kind = def.kind,
+                };
+
+                self.stack_top = base_slot;
+                self.push(Value{ .struct_instance = instance });
+                return null;
+            },
+            .bound_method => |bm| {
+                const fn_obj: *const FnObject = &self.program.functions.items[bm.fn_idx];
+
+                if (fn_obj.arity - 1 != arity) {
+                    return error.ArityMismatch;
+                }
+
+                self.stack[base_slot] = .{ .struct_instance = bm.receiver };
+                self.frames[self.frame_count] = .{
+                    .chunk = &fn_obj.chunk,
+                    .ip = 0,
+                    .base_slot = base_slot,
+                    .fn_index = bm.fn_idx,
+                };
+                self.frame_count += 1;
+                return self.currentFrame();
+            },
+            else => return error.NotCallable,
+        }
+    }
+
+    inline fn executeGetField(self: *Vm, frame: *CallFrame) VmError!void {
+        const field_idx = readU16(frame.chunk, &frame.ip);
+        const field_name = try getFieldNameFromConst(frame.chunk, field_idx);
+
+        const instance = switch (self.pop()) {
+            .struct_instance => |si| si,
+            else => return error.TypeError,
+        };
+
+        const field_meta = findField(instance, field_name);
+        if (field_meta) |meta| {
+            const field_value = if (meta.is_body)
+                instance.body_field_values[meta.index]
+            else
+                instance.field_values[meta.index];
+
+            self.push(field_value);
+        } else {
+            const qualified = try utils.memberName(self.allocator, instance.type_name, field_name);
+            defer self.allocator.free(qualified);
+
+            const val = self.globals.get(qualified) orelse return error.UndefinedField;
+            if (val != .function) {
+                return error.NotCallable;
+            }
+
+            self.push(.{ .bound_method = .{
+                .fn_idx = val.function,
+                .receiver = instance,
+            } });
+        }
+    }
+
+    inline fn executeSetField(self: *Vm, frame: *CallFrame) VmError!void {
+        const field_idx = readU16(frame.chunk, &frame.ip);
+        const field_name = try getFieldNameFromConst(frame.chunk, field_idx);
+
+        const value = self.pop();
+
+        const instance = switch (self.pop()) {
+            .struct_instance => |si| si,
+            else => return error.TypeError,
+        };
+
+        const field_meta = findField(instance, field_name) orelse return error.UndefinedField;
+        if (field_meta.is_body) {
+            instance.body_field_values[field_meta.index] = value;
+        } else {
+            instance.field_values[field_meta.index] = value;
+        }
+
+        self.push(value);
+    }
+
+    inline fn executeConstruct(self: *Vm, frame: *CallFrame) VmError!void {
+        const struct_def_idx = readU16(frame.chunk, &frame.ip);
+        const def = self.program.struct_defs.items[struct_def_idx];
+
+        const field_values = try self.allocator.alloc(Value, def.field_names.len);
+        var i = def.field_names.len;
+        while (i > 0) {
+            i -= 1;
+            field_values[i] = self.pop();
+        }
+
+        const body_field_values = try self.allocator.alloc(Value, def.body_field_names.len);
+        i = def.body_field_names.len;
+        while (i > 0) {
+            i -= 1;
+            body_field_values[i] = Value.unit;
+        }
+
+        const instance = try self.allocator.create(Value.StructInstance);
+        instance.* = .{
+            .type_name = def.name,
+            .field_names = def.field_names,
+            .body_field_names = def.body_field_names,
+            .field_values = field_values,
+            .body_field_values = body_field_values,
+            .kind = def.kind,
+        };
+        self.push(.{ .struct_instance = instance });
     }
 
     // NOTE: -- Helpers
