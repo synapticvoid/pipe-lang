@@ -1515,3 +1515,203 @@ test "compiler: method dispatches to correct receiver" {
     const result = try runCompiled(allocator, &.{ struct_decl, a_decl, b_decl }, .{ .fn_call = call });
     try std.testing.expect(result.eql(.{ .int = 99 }));
 }
+
+// ===========================================================================
+// Step 8: Custom equals dispatch
+// ===========================================================================
+
+test "compiler: case struct without equals uses structural comparison" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    // case struct Point(const x: Int, const y: Int);
+    const fields = [_]ast.Statement.FieldDeclaration{
+        .{ .name = ident("x"), .type_annotation = dummyType(), .mutability = .constant, .default_value = null },
+        .{ .name = ident("y"), .type_annotation = dummyType(), .mutability = .constant, .default_value = null },
+    };
+    const struct_decl = ast.Statement{ .struct_declaration = .{
+        .name = ident("Point"),
+        .fields = &fields,
+        .body_fields = &.{},
+        .kind = .case,
+        .methods = &.{},
+    } };
+
+    // const a = Point(1, 2);
+    // const b = Point(1, 2);
+    // a == b  →  true (structural)
+    const make_point = struct {
+        fn call(alloc: std.mem.Allocator, x: i64, y: i64) !ast.Expression {
+            const args = try alloc.alloc(ast.Expression, 2);
+            args[0] = .{ .literal = .{ .token = ident("x"), .value = .{ .int = x } } };
+            args[1] = .{ .literal = .{ .token = ident("y"), .value = .{ .int = y } } };
+            const si = try alloc.create(ast.Expression.StructInit);
+            si.* = .{ .name = ident("Point"), .args = args };
+            return .{ .struct_init = si };
+        }
+    }.call;
+
+    const a_si = try make_point(allocator, 1, 2);
+    const a_decl = ast.Statement{ .var_declaration = .{
+        .name = ident("a"),
+        .type_annotation = null,
+        .initializer = a_si,
+        .mutability = .constant,
+    } };
+
+    const b_si = try make_point(allocator, 1, 2);
+    const b_decl = ast.Statement{ .var_declaration = .{
+        .name = ident("b"),
+        .type_annotation = null,
+        .initializer = b_si,
+        .mutability = .constant,
+    } };
+
+    const eq = try allocator.create(ast.Expression.Binary);
+    eq.* = .{
+        .left = .{ .variable = .{ .token = ident("a") } },
+        .operator = .{ .type = .equal_equal, .lexeme = "==", .line = 1 },
+        .right = .{ .variable = .{ .token = ident("b") } },
+    };
+
+    const result = try runCompiled(allocator, &.{ struct_decl, a_decl, b_decl }, .{ .binary = eq });
+    try std.testing.expect(result.eql(.{ .boolean = true }));
+}
+
+test "compiler: plain struct without equals uses identity comparison" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    // struct Node(const val: Int);
+    const fields = [_]ast.Statement.FieldDeclaration{
+        .{ .name = ident("val"), .type_annotation = dummyType(), .mutability = .constant, .default_value = null },
+    };
+    const struct_decl = ast.Statement{ .struct_declaration = .{
+        .name = ident("Node"),
+        .fields = &fields,
+        .body_fields = &.{},
+        .kind = .plain,
+        .methods = &.{},
+    } };
+
+    // const a = Node(42); const b = Node(42); a == b → false (different pointers)
+    const make_node = struct {
+        fn call(alloc: std.mem.Allocator, v: i64) !ast.Expression {
+            const args = try alloc.alloc(ast.Expression, 1);
+            args[0] = .{ .literal = .{ .token = ident("v"), .value = .{ .int = v } } };
+            const si = try alloc.create(ast.Expression.StructInit);
+            si.* = .{ .name = ident("Node"), .args = args };
+            return .{ .struct_init = si };
+        }
+    }.call;
+
+    const a_decl = ast.Statement{ .var_declaration = .{
+        .name = ident("a"),
+        .type_annotation = null,
+        .initializer = try make_node(allocator, 42),
+        .mutability = .constant,
+    } };
+    const b_decl = ast.Statement{ .var_declaration = .{
+        .name = ident("b"),
+        .type_annotation = null,
+        .initializer = try make_node(allocator, 42),
+        .mutability = .constant,
+    } };
+
+    const eq = try allocator.create(ast.Expression.Binary);
+    eq.* = .{
+        .left = .{ .variable = .{ .token = ident("a") } },
+        .operator = .{ .type = .equal_equal, .lexeme = "==", .line = 1 },
+        .right = .{ .variable = .{ .token = ident("b") } },
+    };
+
+    const result = try runCompiled(allocator, &.{ struct_decl, a_decl, b_decl }, .{ .binary = eq });
+    try std.testing.expect(result.eql(.{ .boolean = false }));
+}
+
+test "compiler: custom equals method overrides default comparison" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    // case struct Tagged(const id: Int, const label: Str) {
+    //     fn equals(other: Tagged) { return self.id == other.id; }
+    // }
+    // Two instances with same id but different label → equals returns true
+    const fields = [_]ast.Statement.FieldDeclaration{
+        .{ .name = ident("id"), .type_annotation = dummyType(), .mutability = .constant, .default_value = null },
+        .{ .name = ident("label"), .type_annotation = dummyType(), .mutability = .constant, .default_value = null },
+    };
+
+    // Body: return self.id == other.id;
+    const self_fa = try allocator.create(ast.Expression.FieldAccess);
+    self_fa.* = .{ .object = .{ .variable = .{ .token = ident("self") } }, .name = ident("id") };
+    const other_fa = try allocator.create(ast.Expression.FieldAccess);
+    other_fa.* = .{ .object = .{ .variable = .{ .token = ident("other") } }, .name = ident("id") };
+    const id_eq = try allocator.create(ast.Expression.Binary);
+    id_eq.* = .{
+        .left = .{ .field_access = self_fa },
+        .operator = .{ .type = .equal_equal, .lexeme = "==", .line = 1 },
+        .right = .{ .field_access = other_fa },
+    };
+    const ret_stmt = ast.Statement{ .@"return" = .{
+        .token = ident("return"),
+        .value = .{ .binary = id_eq },
+    } };
+
+    var equals_params = [_]ast.Param{
+        .{ .name = ident("other"), .type_annotation = dummyType() },
+    };
+    const equals_method = ast.Statement.FnDeclaration{
+        .name = ident("equals"),
+        .params = &equals_params,
+        .return_type = null,
+        .body = &.{ret_stmt},
+    };
+
+    const struct_decl = ast.Statement{ .struct_declaration = .{
+        .name = ident("Tagged"),
+        .fields = &fields,
+        .body_fields = &.{},
+        .kind = .case,
+        .methods = &.{equals_method},
+    } };
+
+    // const a = Tagged(1, "foo"); const b = Tagged(1, "bar");
+    // a == b → true (same id, different label, custom equals ignores label)
+    const make_tagged = struct {
+        fn call(alloc: std.mem.Allocator, id: i64, label: []const u8) !ast.Expression {
+            const args = try alloc.alloc(ast.Expression, 2);
+            args[0] = .{ .literal = .{ .token = ident("id"), .value = .{ .int = id } } };
+            args[1] = .{ .literal = .{ .token = ident("label"), .value = .{ .string = label } } };
+            const si = try alloc.create(ast.Expression.StructInit);
+            si.* = .{ .name = ident("Tagged"), .args = args };
+            return .{ .struct_init = si };
+        }
+    }.call;
+
+    const a_decl = ast.Statement{ .var_declaration = .{
+        .name = ident("a"),
+        .type_annotation = null,
+        .initializer = try make_tagged(allocator, 1, "foo"),
+        .mutability = .constant,
+    } };
+    const b_decl = ast.Statement{ .var_declaration = .{
+        .name = ident("b"),
+        .type_annotation = null,
+        .initializer = try make_tagged(allocator, 1, "bar"),
+        .mutability = .constant,
+    } };
+
+    const eq = try allocator.create(ast.Expression.Binary);
+    eq.* = .{
+        .left = .{ .variable = .{ .token = ident("a") } },
+        .operator = .{ .type = .equal_equal, .lexeme = "==", .line = 1 },
+        .right = .{ .variable = .{ .token = ident("b") } },
+    };
+
+    const result = try runCompiled(allocator, &.{ struct_decl, a_decl, b_decl }, .{ .binary = eq });
+    try std.testing.expect(result.eql(.{ .boolean = true }));
+}

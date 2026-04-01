@@ -132,8 +132,37 @@ pub const Vm = struct {
                     self.push(.{ .boolean = !val.isTruthy() });
                 },
                 .equal => {
-                    const b = self.pop();
-                    const a = self.pop();
+                    // Peek at top stack to check if the operands are structs
+                    const a = self.stack[self.stack_top - 2];
+                    const b = self.stack[self.stack_top - 1];
+
+                    if (a == .struct_instance and b == .struct_instance) {
+                        // Both are structs, look for Typename.equals on the left operand
+                        // Fallback to == if not found
+                        if (try self.findSpecialMethod(a.struct_instance.type_name, types.METHOD_EQUALS)) |method_idx| {
+                            const fn_obj = &self.program.functions.items[method_idx];
+
+                            // left is already at slot 0, right at slot 1
+                            const base_slot = self.stack_top - 2;
+                            self.frames[self.frame_count] = .{
+                                .chunk = &fn_obj.chunk,
+                                .ip = 0,
+                                .base_slot = base_slot,
+                                .fn_index = method_idx,
+                            };
+                            self.frame_count += 1;
+                            frame = self.currentFrame();
+                            continue;
+                        }
+
+                        self.stack_top -= 2;
+                        self.push(.{ .boolean = a.eql(b) });
+                        continue;
+                    }
+
+                    // Not structs, use values already peaked
+                    _ = self.pop();
+                    _ = self.pop();
                     self.push(.{ .boolean = a.eql(b) });
                 },
                 .greater, .less => {
@@ -486,11 +515,26 @@ pub const Vm = struct {
         return null;
     }
 
+    // Look up special method index from the global registry (equals(), hash(), etc.)
+    // Returns fn_idx if found, null otherwise
+    fn findSpecialMethod(self: *Vm, type_name: []const u8, method_name: []const u8) !?u16 {
+        const qualified = try utils.memberName(self.allocator, type_name, method_name);
+        defer self.allocator.free(qualified);
+
+        const symbol = self.globals.get(qualified) orelse return null;
+        if (symbol != .function) {
+            return null;
+        }
+
+        return symbol.function;
+    }
+
     // Returns the current call frame
     fn currentFrame(self: *Vm) *CallFrame {
         return &self.frames[self.frame_count - 1];
     }
 
+    // Wrap the return value into an Ok/Err struct
     fn wrapResult(self: *Vm, ret_value: Value, result_name: []const u8) VmError!Value {
         // Don't double-wrap an already-wrapped Result (e.g. propagated Err from try)
         if (ret_value == .struct_instance and std.mem.startsWith(u8, ret_value.struct_instance.type_name, result_name)) {
