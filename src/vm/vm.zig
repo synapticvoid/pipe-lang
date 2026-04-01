@@ -232,12 +232,52 @@ pub const Vm = struct {
                         },
                         .native => {
                             // Slice of the fn args
-                            const args = self.stack[base_slot + 1 .. base_slot + 1 + arity];
+                            const arg0_idx = base_slot + 1;
+                            const args = self.stack[arg0_idx .. arg0_idx + arity];
 
                             // Call builtin function, remove the args and push the return value
                             const ret_value = callee.native.func(args, self.ctx);
                             self.stack_top = base_slot;
                             self.push(ret_value);
+                        },
+                        .struct_constructor => {
+                            // Stack: [ ..., constructor_value, arg0, arg1, ... ]
+                            //                    ^ base_slot
+                            const struct_def_idx = callee.struct_constructor;
+                            const def = self.program.struct_defs.items[struct_def_idx];
+
+                            // Check arity
+                            if (def.field_names.len != arity) {
+                                return error.ArityMismatch;
+                            }
+
+                            // Allocate args
+                            const arg0_idx = base_slot + 1;
+                            const args = self.stack[arg0_idx .. arg0_idx + def.field_names.len];
+                            var field_values = try self.allocator.alloc(Value, args.len);
+                            for (args, 0..) |arg, i| {
+                                field_values[i] = arg;
+                            }
+
+                            // Allocate body args
+                            const body_field_values = try self.allocator.alloc(Value, def.body_field_names.len);
+                            for (body_field_values) |*v| {
+                                v.* = Value.unit;
+                            }
+
+                            const instance = try self.allocator.create(Value.StructInstance);
+                            instance.* = .{
+                                .type_name = def.name,
+                                .field_names = def.field_names,
+                                .body_field_names = def.body_field_names,
+                                .field_values = field_values,
+                                .body_field_values = body_field_values,
+                                .kind = def.kind,
+                            };
+
+                            // Reset stack top now that we consumed everything
+                            self.stack_top = base_slot;
+                            self.push(Value{ .struct_instance = instance });
                         },
                         else => return error.NotCallable,
                     }

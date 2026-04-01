@@ -1172,3 +1172,144 @@ test "compiler: nested field access a.b.c" {
     const result = try runCompiled(allocator, &.{ point_decl, line_decl, p_decl, l_decl }, .{ .field_access = fa_x });
     try std.testing.expect(result.eql(.{ .int = 3 }));
 }
+
+// ===========================================================================
+// Step 7: Enum variant constructors
+// ===========================================================================
+
+test "compiler: enum zero-field variant construction" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    // enum Color { Red, Green }
+    const variants = [_]ast.Statement.Variant{
+        .{ .name = ident("Red"), .fields = &.{} },
+        .{ .name = ident("Green"), .fields = &.{} },
+    };
+    const enum_decl = ast.Statement{ .enum_declaration = .{
+        .name = ident("Color"),
+        .is_error = false,
+        .variants = &variants,
+    } };
+
+    // Color.Red()
+    const fa = try allocator.create(ast.Expression.FieldAccess);
+    fa.* = .{ .object = .{ .variable = .{ .token = ident("Color") } }, .name = ident("Red") };
+    const call = try allocator.create(ast.Expression.FnCall);
+    call.* = .{ .callee = .{ .field_access = fa }, .args = &.{} };
+
+    const result = try runCompiled(allocator, &.{enum_decl}, .{ .fn_call = call });
+    try std.testing.expect(result == .struct_instance);
+    try std.testing.expectEqualStrings("Color.Red", result.struct_instance.type_name);
+    try std.testing.expectEqual(@as(usize, 0), result.struct_instance.field_values.len);
+}
+
+test "compiler: enum variant with fields" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    // enum Shape { Circle(const radius: Int) }
+    const circle_fields = [_]ast.Statement.FieldDeclaration{
+        .{ .name = ident("radius"), .type_annotation = dummyType(), .mutability = .constant, .default_value = null },
+    };
+    const variants = [_]ast.Statement.Variant{
+        .{ .name = ident("Circle"), .fields = &circle_fields },
+    };
+    const enum_decl = ast.Statement{ .enum_declaration = .{
+        .name = ident("Shape"),
+        .is_error = false,
+        .variants = &variants,
+    } };
+
+    // Shape.Circle(5)
+    const fa = try allocator.create(ast.Expression.FieldAccess);
+    fa.* = .{ .object = .{ .variable = .{ .token = ident("Shape") } }, .name = ident("Circle") };
+    const args = [_]ast.Expression{
+        .{ .literal = .{ .token = ident("5"), .value = .{ .int = 5 } } },
+    };
+    const call = try allocator.create(ast.Expression.FnCall);
+    call.* = .{ .callee = .{ .field_access = fa }, .args = &args };
+
+    const result = try runCompiled(allocator, &.{enum_decl}, .{ .fn_call = call });
+    try std.testing.expect(result == .struct_instance);
+    try std.testing.expectEqualStrings("Shape.Circle", result.struct_instance.type_name);
+    try std.testing.expectEqual(@as(usize, 1), result.struct_instance.field_values.len);
+    try std.testing.expect(result.struct_instance.field_values[0].eql(.{ .int = 5 }));
+}
+
+test "compiler: qualified enum access resolves to correct variant" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    // enum Color { Red, Green }
+    const variants = [_]ast.Statement.Variant{
+        .{ .name = ident("Red"), .fields = &.{} },
+        .{ .name = ident("Green"), .fields = &.{} },
+    };
+    const enum_decl = ast.Statement{ .enum_declaration = .{
+        .name = ident("Color"),
+        .is_error = false,
+        .variants = &variants,
+    } };
+
+    // Color.Green()  — must resolve to Green, not Red
+    const fa = try allocator.create(ast.Expression.FieldAccess);
+    fa.* = .{ .object = .{ .variable = .{ .token = ident("Color") } }, .name = ident("Green") };
+    const call = try allocator.create(ast.Expression.FnCall);
+    call.* = .{ .callee = .{ .field_access = fa }, .args = &.{} };
+
+    const result = try runCompiled(allocator, &.{enum_decl}, .{ .fn_call = call });
+    try std.testing.expect(result == .struct_instance);
+    try std.testing.expectEqualStrings("Color.Green", result.struct_instance.type_name);
+}
+
+test "compiler: nested enum coercion" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    // enum Inner { A }
+    const inner_variants = [_]ast.Statement.Variant{
+        .{ .name = ident("A"), .fields = &.{} },
+    };
+    const inner_decl = ast.Statement{ .enum_declaration = .{
+        .name = ident("Inner"),
+        .is_error = false,
+        .variants = &inner_variants,
+    } };
+
+    // enum Outer { Inner, B }
+    // "Inner" has zero declared fields but matches a known enum → single-field wrapper
+    const outer_variants = [_]ast.Statement.Variant{
+        .{ .name = ident("Inner"), .fields = &.{} },
+        .{ .name = ident("B"), .fields = &.{} },
+    };
+    const outer_decl = ast.Statement{ .enum_declaration = .{
+        .name = ident("Outer"),
+        .is_error = false,
+        .variants = &outer_variants,
+    } };
+
+    // Inner.A()
+    const inner_fa = try allocator.create(ast.Expression.FieldAccess);
+    inner_fa.* = .{ .object = .{ .variable = .{ .token = ident("Inner") } }, .name = ident("A") };
+    const inner_call = try allocator.create(ast.Expression.FnCall);
+    inner_call.* = .{ .callee = .{ .field_access = inner_fa }, .args = &.{} };
+
+    // Outer.Inner(Inner.A())
+    const outer_fa = try allocator.create(ast.Expression.FieldAccess);
+    outer_fa.* = .{ .object = .{ .variable = .{ .token = ident("Outer") } }, .name = ident("Inner") };
+    const outer_args = [_]ast.Expression{.{ .fn_call = inner_call }};
+    const outer_call = try allocator.create(ast.Expression.FnCall);
+    outer_call.* = .{ .callee = .{ .field_access = outer_fa }, .args = &outer_args };
+
+    const result = try runCompiled(allocator, &.{ inner_decl, outer_decl }, .{ .fn_call = outer_call });
+    try std.testing.expect(result == .struct_instance);
+    try std.testing.expectEqualStrings("Outer.Inner", result.struct_instance.type_name);
+    try std.testing.expectEqual(@as(usize, 1), result.struct_instance.field_values.len);
+    try std.testing.expect(result.struct_instance.field_values[0] == .struct_instance);
+    try std.testing.expectEqualStrings("Inner.A", result.struct_instance.field_values[0].struct_instance.type_name);
+}

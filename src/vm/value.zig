@@ -16,12 +16,20 @@ pub const Value = union(enum) {
 
     // Builtin function
     native: NativeFn,
-    //
+
     // pointer so that copies of a value share identity (u2 = u1 means u1.field == u2.field)
     // var u1 = User("Bob");
     // var u2 = u1;
     // if (u1.name == u2.name) { ... } // true
     struct_instance: *StructInstance,
+
+    // Index of a struct constructor
+    // Stored in a struct defs table in Program
+    //
+    // This makes struct constructor first-class citizens:
+    // enum Color { Red };
+    // transform(Color.Red); // Constructor is passed as a variable
+    struct_constructor: u16,
 
     pub const StructInstance = struct {
         type_name: []const u8,
@@ -71,6 +79,7 @@ pub const Value = union(enum) {
                 }
                 return true;
             },
+            .struct_constructor => |a| a == other.struct_constructor,
         };
     }
 
@@ -88,7 +97,11 @@ pub const Value = union(enum) {
             .boolean => |b| b,
             .int => |n| n != 0,
             .string => |s| s.len > 0,
-            .function, .native, .struct_instance => true,
+            .function,
+            .native,
+            .struct_instance,
+            .struct_constructor,
+            => true,
         };
     }
 
@@ -125,6 +138,7 @@ pub const Value = union(enum) {
                     },
                 }
             },
+            .struct_constructor => |sc| try writer.print("constructor<{d}>", .{sc}),
         }
     }
 };

@@ -31,6 +31,9 @@ pub const Compiler = struct {
     chunk: *Chunk,
     locals: std.ArrayList(Local),
     scope_depth: u32,
+    // Set of declared enum type names; used to detect when a zero-field variant references
+    // an existing enum (nested enum coercion at runtime)
+    known_enum_names: std.StringHashMapUnmanaged(void),
     allocator: std.mem.Allocator,
 
     // Static entry point to compile statements to a Program
@@ -41,6 +44,7 @@ pub const Compiler = struct {
             .chunk = &program.chunk,
             .locals = .{},
             .scope_depth = 0,
+            .known_enum_names = .{},
             .allocator = allocator,
         };
         errdefer compiler.deinit();
@@ -56,12 +60,14 @@ pub const Compiler = struct {
             .chunk = &program.chunk,
             .locals = .{},
             .scope_depth = 0,
+            .known_enum_names = .{},
             .allocator = allocator,
         };
     }
 
     pub fn deinit(self: *Compiler) void {
         self.locals.deinit(self.allocator);
+        self.known_enum_names.deinit(self.allocator);
     }
 
     // NOTE: -- Statements
@@ -81,8 +87,8 @@ pub const Compiler = struct {
             .var_declaration => |var_decl| try self.compileVarDeclarationStatement(var_decl),
             .fn_declaration => |fn_decl| try self.compileFnDeclarationStatement(fn_decl),
             .struct_declaration => |struct_decl| try self.compileStructDeclarationStatement(struct_decl),
+            .enum_declaration => |ed| try self.compileEnumDeclarationStatement(ed),
             .@"return" => |ret| try self.compileReturnStatement(ret),
-            else => return error.UnsupportedNode,
         }
     }
 
@@ -168,6 +174,46 @@ pub const Compiler = struct {
         };
 
         _ = try self.program.addStructDef(struct_obj);
+    }
+
+    fn compileEnumDeclarationStatement(self: *Compiler, ed: ast.Statement.EnumDeclaration) CompileError!void {
+        const enum_name = ed.name.lexeme;
+        for (ed.variants) |variant| {
+            // Build the qualified name EnumName.VariantName
+            const variant_name = variant.name.lexeme;
+            const type_name = try self.buildEnumVariantQualifiedName(enum_name, variant_name);
+
+            var field_names: [][]const u8 = undefined;
+
+            // Nesting an enum inside another?
+            // e.g: enum StaffRole { Admin, Member };
+            // enum AnyRole { StaffRole, Guest };
+            // When compiling AnyRole, StaffRole is already defined.
+            if (variant.fields.len == 0 and self.known_enum_names.contains(variant_name)) {
+                // Rather than redefining the enum, just reference it
+                const names = try self.allocator.alloc([]const u8, 1);
+                names[0] = variant_name;
+                field_names = names;
+            } else {
+                // Collect field_names
+                field_names = try self.allocator.alloc([]const u8, variant.fields.len);
+                for (variant.fields, 0..) |f, i| {
+                    field_names[i] = f.name.lexeme;
+                }
+            }
+
+            // The struct def is always a .case kind (for equality)
+            _ = try self.program.addStructDef(.{
+                .name = type_name,
+                .kind = .case,
+                .field_names = field_names,
+                .body_field_names = &.{},
+                .body_default_fn = null,
+            });
+        }
+
+        // Don't forget to add the enum to our known enum names
+        try self.known_enum_names.put(self.allocator, enum_name, {});
     }
 
     fn compileReturnStatement(self: *Compiler, ret: ast.Statement.Return) CompileError!void {
@@ -353,6 +399,22 @@ pub const Compiler = struct {
     }
 
     fn compileFieldAccess(self: *Compiler, fa: *const ast.Expression.FieldAccess) CompileError!void {
+        // Access an enum variant
+        if (fa.object == .variable and self.known_enum_names.contains(fa.object.variable.token.lexeme)) {
+            const type_name = try self.buildEnumVariantQualifiedName(fa.object.variable.token.lexeme, fa.name.lexeme);
+            defer self.allocator.free(type_name);
+
+            // Search for a matching name
+            for (self.program.struct_defs.items, 0..) |def, i| {
+                if (std.mem.eql(u8, def.name, type_name)) {
+                    try self.emitConstant(.{ .struct_constructor = @intCast(i) }, fa.name.line);
+                    return;
+                }
+            }
+            return error.UndefinedStruct;
+        }
+
+        // Access a field
         try self.compileExpression(fa.object);
         const name_idx = try self.chunk.addConstant(.{ .string = fa.name.lexeme });
 
@@ -481,5 +543,15 @@ pub const Compiler = struct {
         }
 
         return null;
+    }
+
+    // Returns the qualified name EnumName.VariantName
+    fn buildEnumVariantQualifiedName(self: *Compiler, enum_name: []const u8, variant_name: []const u8) CompileError![]const u8 {
+        const type_name = try self.allocator.alloc(u8, enum_name.len + variant_name.len + 1);
+        @memcpy(type_name[0..enum_name.len], enum_name);
+        type_name[enum_name.len] = '.';
+        @memcpy(type_name[enum_name.len + 1 ..], variant_name);
+
+        return type_name;
     }
 };
