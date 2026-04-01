@@ -26,13 +26,13 @@ test "writeU16 encodes big-endian" {
     try std.testing.expectEqual(@as(u8, 0xCD), chunk.code.items[1]);
 }
 
-test "addConstant returns sequential indices" {
+test "findOrAddConstant returns sequential indices" {
     const allocator = std.testing.allocator;
     var chunk = Chunk.init(allocator);
     defer chunk.deinit();
 
-    const idx0 = try chunk.addConstant(.{ .int = 42 });
-    const idx1 = try chunk.addConstant(.{ .int = 99 });
+    const idx0 = try chunk.findOrAddConstant(.{ .int = 42 });
+    const idx1 = try chunk.findOrAddConstant(.{ .int = 99 });
 
     try std.testing.expectEqual(@as(u16, 0), idx0);
     try std.testing.expectEqual(@as(u16, 1), idx1);

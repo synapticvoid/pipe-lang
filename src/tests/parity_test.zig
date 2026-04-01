@@ -153,3 +153,75 @@ test "parity: print boolean" {
         .{ "print(true);", "true\n" },
     });
 }
+
+// =========================================================================
+// Error handling: try / catch / fallible functions
+// =========================================================================
+
+test "parity: fallible function wraps success in Ok" {
+    try expectParity(.{
+        \\error enum E { Fail, }
+        \\fn maybe(x: Int) E!Int { x; }
+        \\maybe(42);
+    });
+}
+
+test "parity: fallible function wraps error in Err" {
+    try expectParity(.{
+        \\error enum E { Fail, }
+        \\fn fail() E!Int { E.Fail(); }
+        \\fail();
+    });
+}
+
+test "parity: try on Ok unwraps value" {
+    try expectParity(.{
+        \\error enum E { Fail, }
+        \\fn maybe(x: Int) E!Int { x; }
+        \\fn caller(x: Int) E!Int { try maybe(x); }
+        \\caller(42);
+    });
+}
+
+test "parity: try on Err propagates error" {
+    try expectParity(.{
+        \\error enum E { Fail, }
+        \\fn fail() E!Int { E.Fail(); }
+        \\fn caller() E!Int { try fail(); }
+        \\caller();
+    });
+}
+
+test "parity: catch on Ok returns unwrapped value" {
+    try expectParity(.{
+        \\error enum E { Fail, }
+        \\fn maybe(x: Int) E!Int { x; }
+        \\maybe(42) catch e { 0; };
+    });
+}
+
+test "parity: catch on Err executes handler" {
+    try expectParity(.{
+        \\error enum E { Fail, }
+        \\fn fail() E!Int { E.Fail(); }
+        \\fail() catch e { 0; };
+    });
+}
+
+test "parity: catch with binding gives access to error value" {
+    try expectParity(.{
+        \\error enum E { Fail(const code: Int), }
+        \\fn fail() E!Int { E.Fail(99); }
+        \\fail() catch e { e.code; };
+    });
+}
+
+test "parity: nested try propagation across call frames" {
+    try expectParity(.{
+        \\error enum E { Fail, }
+        \\fn fail() E!Int { E.Fail(); }
+        \\fn middle() E!Int { try fail(); }
+        \\fn outer() E!Int { try middle(); }
+        \\outer();
+    });
+}

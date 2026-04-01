@@ -130,5 +130,22 @@ pub fn disassembleInstruction(writer: anytype, chunk: *const Chunk, offset: usiz
             try writer.print("{s} {d}\n", .{ @tagName(op), operand });
             return offset + 3;
         },
+
+        // =========================================================================
+        // Two u16 operands (name_const_idx + fail_jump)
+        // =========================================================================
+
+        .match_variant => {
+            if (offset + 4 >= chunk.code.items.len) {
+                return error.InvalidOffset;
+            }
+
+            const name_idx = @as(u16, chunk.code.items[offset + 1]) << 8 | chunk.code.items[offset + 2];
+            const fail_jump = @as(u16, chunk.code.items[offset + 3]) << 8 | chunk.code.items[offset + 4];
+            const name = chunk.constants.items[name_idx];
+
+            try writer.print("{s} {any} -> {d}\n", .{ @tagName(op), name, fail_jump });
+            return offset + 5;
+        },
     }
 }

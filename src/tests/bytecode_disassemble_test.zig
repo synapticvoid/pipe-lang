@@ -50,7 +50,7 @@ test "disassemble constant opcode with value" {
     var chunk = Chunk.init(std.testing.allocator);
     defer chunk.deinit();
 
-    const idx = try chunk.addConstant(.{ .int = 42 });
+    const idx = try chunk.findOrAddConstant(.{ .int = 42 });
     try chunk.writeOp(.constant, 1);
     try chunk.writeU16(idx, 1);
 
@@ -77,7 +77,7 @@ test "disassemble get_field opcode with constant operand" {
     var chunk = Chunk.init(std.testing.allocator);
     defer chunk.deinit();
 
-    const idx = try chunk.addConstant(.{ .int = 7 });
+    const idx = try chunk.findOrAddConstant(.{ .int = 7 });
     try chunk.writeOp(.get_field, 1);
     try chunk.writeU16(idx, 1);
 
@@ -91,7 +91,7 @@ test "disassemble set_field opcode with constant operand" {
     var chunk = Chunk.init(std.testing.allocator);
     defer chunk.deinit();
 
-    const idx = try chunk.addConstant(.{ .int = 11 });
+    const idx = try chunk.findOrAddConstant(.{ .int = 11 });
     try chunk.writeOp(.set_field, 1);
     try chunk.writeU16(idx, 1);
 
@@ -118,7 +118,7 @@ test "disassemble full chunk with header" {
     var chunk = Chunk.init(std.testing.allocator);
     defer chunk.deinit();
 
-    const idx = try chunk.addConstant(.{ .int = 99 });
+    const idx = try chunk.findOrAddConstant(.{ .int = 99 });
     try chunk.writeOp(.constant, 1);
     try chunk.writeU16(idx, 1);
     try chunk.writeOp(.@"return", 2);

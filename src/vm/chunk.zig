@@ -46,7 +46,14 @@ pub const Chunk = struct {
     }
 
     // Add the constant to the pool and return its index
-    pub fn addConstant(self: *Chunk, value: Value) !u16 {
+    pub fn findOrAddConstant(self: *Chunk, value: Value) !u16 {
+        // Find existing constant
+        for (self.constants.items, 0..) |c, i| {
+            if (c.eql(value)) {
+                return @intCast(i);
+            }
+        }
+
         if (self.constants.items.len >= std.math.maxInt(u16)) {
             return error.TooManyConstants;
         }

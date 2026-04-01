@@ -83,7 +83,7 @@ test "constant pushes value onto stack" {
     var chunk = Chunk.init(std.testing.allocator);
     defer chunk.deinit();
 
-    const idx = try chunk.addConstant(.{ .int = 42 });
+    const idx = try chunk.findOrAddConstant(.{ .int = 42 });
     try chunk.writeOp(.constant, 1);
     try chunk.writeU16(idx, 1);
     try chunk.writeOp(.@"return", 1);
@@ -130,7 +130,7 @@ test "negate integer" {
     var chunk = Chunk.init(std.testing.allocator);
     defer chunk.deinit();
 
-    const idx = try chunk.addConstant(.{ .int = 7 });
+    const idx = try chunk.findOrAddConstant(.{ .int = 7 });
     try chunk.writeOp(.constant, 1);
     try chunk.writeU16(idx, 1);
     try chunk.writeOp(.negate, 1);
@@ -169,7 +169,7 @@ test "not uses truthiness" {
     var chunk = Chunk.init(std.testing.allocator);
     defer chunk.deinit();
 
-    const idx = try chunk.addConstant(.{ .int = 0 });
+    const idx = try chunk.findOrAddConstant(.{ .int = 0 });
     try chunk.writeOp(.constant, 1);
     try chunk.writeU16(idx, 1);
     try chunk.writeOp(.not, 1);
@@ -184,11 +184,11 @@ test "pop discards top of stack" {
     var chunk = Chunk.init(std.testing.allocator);
     defer chunk.deinit();
 
-    const idx0 = try chunk.addConstant(.{ .int = 99 });
+    const idx0 = try chunk.findOrAddConstant(.{ .int = 99 });
     try chunk.writeOp(.constant, 1);
     try chunk.writeU16(idx0, 1);
 
-    const idx1 = try chunk.addConstant(.{ .int = 42 });
+    const idx1 = try chunk.findOrAddConstant(.{ .int = 42 });
     try chunk.writeOp(.constant, 1);
     try chunk.writeU16(idx1, 1);
 
@@ -208,11 +208,11 @@ test "add two integers" {
     var chunk = Chunk.init(std.testing.allocator);
     defer chunk.deinit();
 
-    const a = try chunk.addConstant(.{ .int = 10 });
+    const a = try chunk.findOrAddConstant(.{ .int = 10 });
     try chunk.writeOp(.constant, 1);
     try chunk.writeU16(a, 1);
 
-    const b = try chunk.addConstant(.{ .int = 32 });
+    const b = try chunk.findOrAddConstant(.{ .int = 32 });
     try chunk.writeOp(.constant, 1);
     try chunk.writeU16(b, 1);
 
@@ -228,11 +228,11 @@ test "subtract two integers" {
     var chunk = Chunk.init(std.testing.allocator);
     defer chunk.deinit();
 
-    const a = try chunk.addConstant(.{ .int = 50 });
+    const a = try chunk.findOrAddConstant(.{ .int = 50 });
     try chunk.writeOp(.constant, 1);
     try chunk.writeU16(a, 1);
 
-    const b = try chunk.addConstant(.{ .int = 8 });
+    const b = try chunk.findOrAddConstant(.{ .int = 8 });
     try chunk.writeOp(.constant, 1);
     try chunk.writeU16(b, 1);
 
@@ -248,11 +248,11 @@ test "multiply two integers" {
     var chunk = Chunk.init(std.testing.allocator);
     defer chunk.deinit();
 
-    const a = try chunk.addConstant(.{ .int = 6 });
+    const a = try chunk.findOrAddConstant(.{ .int = 6 });
     try chunk.writeOp(.constant, 1);
     try chunk.writeU16(a, 1);
 
-    const b = try chunk.addConstant(.{ .int = 7 });
+    const b = try chunk.findOrAddConstant(.{ .int = 7 });
     try chunk.writeOp(.constant, 1);
     try chunk.writeU16(b, 1);
 
@@ -268,11 +268,11 @@ test "divide two integers" {
     var chunk = Chunk.init(std.testing.allocator);
     defer chunk.deinit();
 
-    const a = try chunk.addConstant(.{ .int = 84 });
+    const a = try chunk.findOrAddConstant(.{ .int = 84 });
     try chunk.writeOp(.constant, 1);
     try chunk.writeU16(a, 1);
 
-    const b = try chunk.addConstant(.{ .int = 2 });
+    const b = try chunk.findOrAddConstant(.{ .int = 2 });
     try chunk.writeOp(.constant, 1);
     try chunk.writeU16(b, 1);
 
@@ -287,11 +287,11 @@ test "divide by zero is error" {
     var chunk = Chunk.init(std.testing.allocator);
     defer chunk.deinit();
 
-    const a = try chunk.addConstant(.{ .int = 1 });
+    const a = try chunk.findOrAddConstant(.{ .int = 1 });
     try chunk.writeOp(.constant, 1);
     try chunk.writeU16(a, 1);
 
-    const b = try chunk.addConstant(.{ .int = 0 });
+    const b = try chunk.findOrAddConstant(.{ .int = 0 });
     try chunk.writeOp(.constant, 1);
     try chunk.writeU16(b, 1);
 
@@ -306,11 +306,11 @@ test "equal integers" {
     var chunk = Chunk.init(std.testing.allocator);
     defer chunk.deinit();
 
-    const a = try chunk.addConstant(.{ .int = 42 });
+    const a = try chunk.findOrAddConstant(.{ .int = 42 });
     try chunk.writeOp(.constant, 1);
     try chunk.writeU16(a, 1);
 
-    const b = try chunk.addConstant(.{ .int = 42 });
+    const b = try chunk.findOrAddConstant(.{ .int = 42 });
     try chunk.writeOp(.constant, 1);
     try chunk.writeU16(b, 1);
 
@@ -326,11 +326,11 @@ test "not equal integers" {
     var chunk = Chunk.init(std.testing.allocator);
     defer chunk.deinit();
 
-    const a = try chunk.addConstant(.{ .int = 1 });
+    const a = try chunk.findOrAddConstant(.{ .int = 1 });
     try chunk.writeOp(.constant, 1);
     try chunk.writeU16(a, 1);
 
-    const b = try chunk.addConstant(.{ .int = 2 });
+    const b = try chunk.findOrAddConstant(.{ .int = 2 });
     try chunk.writeOp(.constant, 1);
     try chunk.writeU16(b, 1);
 
@@ -346,11 +346,11 @@ test "greater than" {
     var chunk = Chunk.init(std.testing.allocator);
     defer chunk.deinit();
 
-    const a = try chunk.addConstant(.{ .int = 5 });
+    const a = try chunk.findOrAddConstant(.{ .int = 5 });
     try chunk.writeOp(.constant, 1);
     try chunk.writeU16(a, 1);
 
-    const b = try chunk.addConstant(.{ .int = 3 });
+    const b = try chunk.findOrAddConstant(.{ .int = 3 });
     try chunk.writeOp(.constant, 1);
     try chunk.writeU16(b, 1);
 
@@ -366,11 +366,11 @@ test "less than" {
     var chunk = Chunk.init(std.testing.allocator);
     defer chunk.deinit();
 
-    const a = try chunk.addConstant(.{ .int = 3 });
+    const a = try chunk.findOrAddConstant(.{ .int = 3 });
     try chunk.writeOp(.constant, 1);
     try chunk.writeU16(a, 1);
 
-    const b = try chunk.addConstant(.{ .int = 5 });
+    const b = try chunk.findOrAddConstant(.{ .int = 5 });
     try chunk.writeOp(.constant, 1);
     try chunk.writeU16(b, 1);
 
@@ -396,17 +396,17 @@ test "complex expression: (2 + 3) * -4" {
     var chunk = Chunk.init(std.testing.allocator);
     defer chunk.deinit();
 
-    const c2 = try chunk.addConstant(.{ .int = 2 });
+    const c2 = try chunk.findOrAddConstant(.{ .int = 2 });
     try chunk.writeOp(.constant, 1);
     try chunk.writeU16(c2, 1);
 
-    const c3 = try chunk.addConstant(.{ .int = 3 });
+    const c3 = try chunk.findOrAddConstant(.{ .int = 3 });
     try chunk.writeOp(.constant, 1);
     try chunk.writeU16(c3, 1);
 
     try chunk.writeOp(.add, 1);
 
-    const c4 = try chunk.addConstant(.{ .int = 4 });
+    const c4 = try chunk.findOrAddConstant(.{ .int = 4 });
     try chunk.writeOp(.constant, 1);
     try chunk.writeU16(c4, 1);
 
@@ -427,8 +427,8 @@ test "define and get global variable" {
     var chunk = Chunk.init(std.testing.allocator);
     defer chunk.deinit();
 
-    const name_idx = try chunk.addConstant(.{ .string = "x" });
-    const val_idx = try chunk.addConstant(.{ .int = 42 });
+    const name_idx = try chunk.findOrAddConstant(.{ .string = "x" });
+    const val_idx = try chunk.findOrAddConstant(.{ .int = 42 });
 
     // Push value, then define_global
     try chunk.writeOp(.constant, 1);
@@ -450,9 +450,9 @@ test "set existing global variable" {
     var chunk = Chunk.init(std.testing.allocator);
     defer chunk.deinit();
 
-    const name_idx = try chunk.addConstant(.{ .string = "x" });
-    const val10 = try chunk.addConstant(.{ .int = 10 });
-    const val20 = try chunk.addConstant(.{ .int = 20 });
+    const name_idx = try chunk.findOrAddConstant(.{ .string = "x" });
+    const val10 = try chunk.findOrAddConstant(.{ .int = 10 });
+    const val20 = try chunk.findOrAddConstant(.{ .int = 20 });
 
     // Define x = 10
     try chunk.writeOp(.constant, 1);
@@ -479,7 +479,7 @@ test "get undefined global is error" {
     var chunk = Chunk.init(std.testing.allocator);
     defer chunk.deinit();
 
-    const name_idx = try chunk.addConstant(.{ .string = "nope" });
+    const name_idx = try chunk.findOrAddConstant(.{ .string = "nope" });
     try chunk.writeOp(.get_global, 1);
     try chunk.writeU16(name_idx, 1);
     try chunk.writeOp(.@"return", 1);
@@ -491,8 +491,8 @@ test "set undefined global is error" {
     var chunk = Chunk.init(std.testing.allocator);
     defer chunk.deinit();
 
-    const name_idx = try chunk.addConstant(.{ .string = "nope" });
-    const val = try chunk.addConstant(.{ .int = 1 });
+    const name_idx = try chunk.findOrAddConstant(.{ .string = "nope" });
+    const val = try chunk.findOrAddConstant(.{ .int = 1 });
 
     try chunk.writeOp(.constant, 1);
     try chunk.writeU16(val, 1);
@@ -515,7 +515,7 @@ test "get and set local variable" {
     defer chunk.deinit();
 
     try chunk.writeOp(.null, 1); // slot 0 placeholder
-    const val = try chunk.addConstant(.{ .int = 42 });
+    const val = try chunk.findOrAddConstant(.{ .int = 42 });
     try chunk.writeOp(.constant, 1);
     try chunk.writeU16(val, 1); // slot 1
 
@@ -536,11 +536,11 @@ test "set local variable" {
     defer chunk.deinit();
 
     try chunk.writeOp(.null, 1); // slot 0
-    const val10 = try chunk.addConstant(.{ .int = 10 });
+    const val10 = try chunk.findOrAddConstant(.{ .int = 10 });
     try chunk.writeOp(.constant, 1);
     try chunk.writeU16(val10, 1); // slot 1
 
-    const val99 = try chunk.addConstant(.{ .int = 99 });
+    const val99 = try chunk.findOrAddConstant(.{ .int = 99 });
     try chunk.writeOp(.constant, 1);
     try chunk.writeU16(val99, 1);
     try chunk.writeOp(.set_local, 1);
@@ -572,19 +572,19 @@ test "jump skips instructions" {
     var chunk = Chunk.init(std.testing.allocator);
     defer chunk.deinit();
 
-    const c1 = try chunk.addConstant(.{ .int = 1 });
+    const c1 = try chunk.findOrAddConstant(.{ .int = 1 });
     try chunk.writeOp(.constant, 1); // offset 0
     try chunk.writeU16(c1, 1); // offset 1-2
 
     try chunk.writeOp(.jump, 1); // offset 3
     try chunk.writeU16(10, 1); // offset 4-5, jump to absolute offset 10
 
-    const c_bad = try chunk.addConstant(.{ .int = 999 });
+    const c_bad = try chunk.findOrAddConstant(.{ .int = 999 });
     try chunk.writeOp(.constant, 1); // offset 6 (skipped)
     try chunk.writeU16(c_bad, 1); // offset 7-8 (skipped)
     try chunk.writeOp(.@"return", 1); // offset 9 (skipped)
 
-    const c3 = try chunk.addConstant(.{ .int = 3 });
+    const c3 = try chunk.findOrAddConstant(.{ .int = 3 });
     try chunk.writeOp(.constant, 1); // offset 10
     try chunk.writeU16(c3, 1);
 
@@ -605,12 +605,12 @@ test "jump_if_false skips when falsy" {
     try chunk.writeOp(.jump_if_false, 1); // offset 1
     try chunk.writeU16(8, 1); // offset 2-3, jump to absolute offset 8
 
-    const c_bad = try chunk.addConstant(.{ .int = 999 });
+    const c_bad = try chunk.findOrAddConstant(.{ .int = 999 });
     try chunk.writeOp(.constant, 1); // offset 4 (skipped)
     try chunk.writeU16(c_bad, 1); // offset 5-6 (skipped)
     try chunk.writeOp(.@"return", 1); // offset 7 (skipped)
 
-    const c42 = try chunk.addConstant(.{ .int = 42 });
+    const c42 = try chunk.findOrAddConstant(.{ .int = 42 });
     try chunk.writeOp(.constant, 1); // offset 8
     try chunk.writeU16(c42, 1);
     try chunk.writeOp(.@"return", 1);
@@ -629,12 +629,12 @@ test "jump_if_false falls through when truthy" {
     try chunk.writeOp(.jump_if_false, 1); // offset 1
     try chunk.writeU16(8, 1); // offset 2-3, jump to absolute offset 8 (not taken)
 
-    const c42 = try chunk.addConstant(.{ .int = 42 });
+    const c42 = try chunk.findOrAddConstant(.{ .int = 42 });
     try chunk.writeOp(.constant, 1); // offset 4
     try chunk.writeU16(c42, 1);
     try chunk.writeOp(.@"return", 1); // offset 7
 
-    const c_bad = try chunk.addConstant(.{ .int = 999 });
+    const c_bad = try chunk.findOrAddConstant(.{ .int = 999 });
     try chunk.writeOp(.constant, 1); // offset 8 (not reached)
     try chunk.writeU16(c_bad, 1);
     try chunk.writeOp(.@"return", 1);
@@ -744,9 +744,9 @@ test "loop jumps backward" {
     defer chunk.deinit();
 
     // Constants
-    const c0 = try chunk.addConstant(.{ .int = 0 }); // index 0
-    const c3 = try chunk.addConstant(.{ .int = 3 }); // index 1
-    const c1 = try chunk.addConstant(.{ .int = 1 }); // index 2
+    const c0 = try chunk.findOrAddConstant(.{ .int = 0 }); // index 0
+    const c3 = try chunk.findOrAddConstant(.{ .int = 3 }); // index 1
+    const c1 = try chunk.findOrAddConstant(.{ .int = 1 }); // index 2
 
     // offset 0: acc = 0 (slot 0)
     try chunk.writeOp(.constant, 1);
@@ -824,9 +824,9 @@ test "construct then get_field returns constructor field" {
     var chunk = Chunk.init(std.testing.allocator);
     defer chunk.deinit();
 
-    const c_id = try chunk.addConstant(.{ .int = 7 });
-    const c_name_val = try chunk.addConstant(.{ .string = "Ada" });
-    const c_field_name = try chunk.addConstant(.{ .string = "name" });
+    const c_id = try chunk.findOrAddConstant(.{ .int = 7 });
+    const c_name_val = try chunk.findOrAddConstant(.{ .string = "Ada" });
+    const c_field_name = try chunk.findOrAddConstant(.{ .string = "name" });
 
     try chunk.writeOp(.constant, 1);
     try chunk.writeU16(c_id, 1);
@@ -856,11 +856,11 @@ test "set_field mutates instance field" {
     var chunk = Chunk.init(std.testing.allocator);
     defer chunk.deinit();
 
-    const c_id = try chunk.addConstant(.{ .int = 1 });
-    const c_name_initial = try chunk.addConstant(.{ .string = "Alice" });
-    const c_name_updated = try chunk.addConstant(.{ .string = "Bob" });
-    const c_global_name = try chunk.addConstant(.{ .string = "u" });
-    const c_field_name = try chunk.addConstant(.{ .string = "name" });
+    const c_id = try chunk.findOrAddConstant(.{ .int = 1 });
+    const c_name_initial = try chunk.findOrAddConstant(.{ .string = "Alice" });
+    const c_name_updated = try chunk.findOrAddConstant(.{ .string = "Bob" });
+    const c_global_name = try chunk.findOrAddConstant(.{ .string = "u" });
+    const c_field_name = try chunk.findOrAddConstant(.{ .string = "name" });
 
     try chunk.writeOp(.constant, 1);
     try chunk.writeU16(c_id, 1);
@@ -904,9 +904,9 @@ test "get_field on missing name is UndefinedField" {
     var chunk = Chunk.init(std.testing.allocator);
     defer chunk.deinit();
 
-    const c_id = try chunk.addConstant(.{ .int = 1 });
-    const c_name_val = try chunk.addConstant(.{ .string = "Alice" });
-    const c_missing_field = try chunk.addConstant(.{ .string = "email" });
+    const c_id = try chunk.findOrAddConstant(.{ .int = 1 });
+    const c_name_val = try chunk.findOrAddConstant(.{ .string = "Alice" });
+    const c_missing_field = try chunk.findOrAddConstant(.{ .string = "email" });
 
     try chunk.writeOp(.constant, 1);
     try chunk.writeU16(c_id, 1);
@@ -935,8 +935,8 @@ test "get_field on non-struct is TypeError" {
     var chunk = Chunk.init(std.testing.allocator);
     defer chunk.deinit();
 
-    const c_num = try chunk.addConstant(.{ .int = 123 });
-    const c_field_name = try chunk.addConstant(.{ .string = "name" });
+    const c_num = try chunk.findOrAddConstant(.{ .int = 123 });
+    const c_field_name = try chunk.findOrAddConstant(.{ .string = "name" });
 
     try chunk.writeOp(.constant, 1);
     try chunk.writeU16(c_num, 1);

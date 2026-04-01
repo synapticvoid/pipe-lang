@@ -1,4 +1,8 @@
 const std = @import("std");
+
+const utils = @import("../utils.zig");
+const types = @import("../types.zig");
+
 const RuntimeContext = @import("../runtime.zig").RuntimeContext;
 const Chunk = @import("chunk.zig").Chunk;
 const OpCode = @import("opcode.zig").OpCode;
@@ -7,12 +11,13 @@ const FnObject = @import("program.zig").FnObject;
 const Program = @import("program.zig").Program;
 
 pub const VmError = error{
-    DivisionByZero,
-    TypeError, // wrong types for arithmetic/negate/table
-    UndefinedVariable,
-    UndefinedField,
     ArityMismatch,
+    DivisionByZero,
     NotCallable, // Not a function/method that we can call
+    OutOfMemory,
+    TypeError, // wrong types for arithmetic/negate/table
+    UndefinedField,
+    UndefinedVariable,
 };
 
 const MAX_STACK = 256;
@@ -22,6 +27,7 @@ const CallFrame = struct {
     chunk: *const Chunk,
     ip: usize,
     base_slot: usize, // Where this frame's locals start on the value stack
+    fn_index: ?u16, // Index of the current function. Used to check FnObject.result_name
 };
 
 pub const Vm = struct {
@@ -69,7 +75,12 @@ pub const Vm = struct {
 
     pub fn run(self: *Vm) !Value {
         // Setup initial frame for top-level
-        self.frames[0] = .{ .chunk = &self.program.chunk, .ip = 0, .base_slot = 0 };
+        self.frames[0] = .{
+            .chunk = &self.program.chunk,
+            .ip = 0,
+            .base_slot = 0,
+            .fn_index = null,
+        };
         self.frame_count = 1;
         return self.execute();
     }
@@ -83,30 +94,13 @@ pub const Vm = struct {
             frame.ip += 1;
 
             switch (op) {
+                // =============================================================
+                // Constants and Literals
+                // =============================================================
+
                 .constant => {
-                    // Read pool index from chunk
                     const idx = readU16(frame.chunk, &frame.ip);
                     self.push(frame.chunk.constants.items[idx]);
-                },
-                .true => self.push(.{ .boolean = true }),
-                .false => self.push(.{ .boolean = false }),
-                .null => self.push(.null),
-                .unit => self.push(.unit),
-                .pop => _ = self.pop(),
-                .negate => {
-                    const val = self.pop();
-                    if (!val.isNumber()) {
-                        return VmError.TypeError;
-                    }
-
-                    self.push(switch (val) {
-                        .int => |n| .{ .int = -n },
-                        else => unreachable,
-                    });
-                },
-                .not => {
-                    const val = self.pop();
-                    self.push(.{ .boolean = !val.isTruthy() });
                 },
                 .add, .subtract, .multiply, .divide => {
                     const b = self.pop(); // right
@@ -122,32 +116,112 @@ pub const Vm = struct {
                         else => unreachable,
                     } });
                 },
+                .negate => {
+                    const val = self.pop();
+                    if (!val.isNumber()) {
+                        return VmError.TypeError;
+                    }
+
+                    self.push(switch (val) {
+                        .int => |n| .{ .int = -n },
+                        else => unreachable,
+                    });
+                },
+                .not => {
+                    const val = self.pop();
+                    self.push(.{ .boolean = !val.isTruthy() });
+                },
                 .equal => {
                     const b = self.pop();
                     const a = self.pop();
                     self.push(.{ .boolean = a.eql(b) });
                 },
                 .greater, .less => {
-                    // Read operands from stack
                     const b = self.pop();
                     const a = self.pop();
 
                     std.debug.assert(a.isNumber() and b.isNumber());
 
-                    // Compare them and push the result
                     self.push(.{ .boolean = switch (op) {
                         .greater => a.int > b.int,
                         .less => a.int < b.int,
                         else => unreachable,
                     } });
                 },
-                .define_global => {
-                    // Read pool index to retrieve the name
-                    const idx = readU16(frame.chunk, &frame.ip);
-                    const name = frame.chunk.constants.items[idx].string;
+                .true => self.push(.{ .boolean = true }),
+                .false => self.push(.{ .boolean = false }),
+                .null => self.push(.null),
+                .unit => self.push(.unit),
 
-                    const val = self.pop();
-                    try self.globals.put(self.allocator, name, val);
+                // =============================================================
+                // Stack and Control Flow
+                // =============================================================
+
+                .pop => _ = self.pop(),
+                .jump => frame.ip = readU16(frame.chunk, &frame.ip),
+                .jump_if_false => {
+                    const offset = readU16(frame.chunk, &frame.ip);
+                    const condition = self.pop();
+                    if (!condition.isTruthy()) {
+                        frame.ip = offset;
+                    }
+                },
+                .loop => frame.ip = readU16(frame.chunk, &frame.ip),
+                .match_variant => {
+                    const name_idx = readU16(frame.chunk, &frame.ip);
+                    const fail_jump = readU16(frame.chunk, &frame.ip);
+                    const variant_name = try getFieldNameFromConst(frame.chunk, name_idx);
+
+                    const top = self.stack[self.stack_top - 1];
+                    if (top == .struct_instance) {
+                        const type_name = top.struct_instance.type_name;
+                        if (utils.isVariant(type_name, variant_name)) {
+                            // MATCH: replace TOS with unwrapped value (Ok.value)
+                            self.stack[self.stack_top - 1] = top.struct_instance.field_values[0];
+                        } else {
+                            frame.ip = fail_jump;
+                        }
+                    } else {
+                        frame.ip = fail_jump;
+                    }
+                },
+                .@"return" => {
+                    const ret_value = if (self.stack_top > frame.base_slot)
+                        self.pop()
+                    else
+                        Value.unit;
+
+                    self.stack_top = frame.base_slot;
+                    self.frame_count -= 1;
+
+                    if (self.frame_count == 0) {
+                        return ret_value;
+                    }
+
+                    // Wrap if fallible, otherwise pass through
+                    const final_value = if (frame.fn_index) |fn_index| blk: {
+                        const function = self.program.functions.items[fn_index];
+                        if (function.result_name) |name| {
+                            break :blk try self.wrapResult(ret_value, name);
+                        }
+                        break :blk ret_value;
+                    } else ret_value;
+
+                    self.push(final_value);
+                    frame = self.currentFrame();
+                },
+
+                // =============================================================
+                // Variables
+                // =============================================================
+
+                .get_local => {
+                    const idx = frame.base_slot + readU16(frame.chunk, &frame.ip);
+                    self.push(self.stack[idx]);
+                },
+                .set_local => {
+                    const idx = frame.base_slot + readU16(frame.chunk, &frame.ip);
+                    self.stack[idx] = self.stack[self.stack_top - 1];
                 },
                 .get_global => {
                     const idx = readU16(frame.chunk, &frame.ip);
@@ -164,52 +238,20 @@ pub const Vm = struct {
                         return error.UndefinedVariable;
                     }
                 },
-                .get_local => {
-                    const idx = frame.base_slot + readU16(frame.chunk, &frame.ip);
-                    self.push(self.stack[idx]);
-                },
-                .set_local => {
-                    const idx = frame.base_slot + readU16(frame.chunk, &frame.ip);
-                    self.stack[idx] = self.stack[self.stack_top - 1];
-                },
-                .jump => frame.ip = readU16(frame.chunk, &frame.ip),
-                .jump_if_false => {
-                    // Read offset
-                    const offset = readU16(frame.chunk, &frame.ip);
+                .define_global => {
+                    const idx = readU16(frame.chunk, &frame.ip);
+                    const name = frame.chunk.constants.items[idx].string;
 
-                    // Evalute condition on stack
-                    const condition = self.pop();
-                    if (!condition.isTruthy()) {
-                        frame.ip = offset;
-                    }
+                    const val = self.pop();
+                    try self.globals.put(self.allocator, name, val);
                 },
-                .loop => frame.ip = readU16(frame.chunk, &frame.ip),
-                .@"return" => {
-                    // Pop the return value (or unit if stack is at base)
-                    const ret_value = if (self.stack_top > frame.base_slot)
-                        self.pop()
-                    else
-                        Value.unit;
 
-                    // Remove all locals of the current stack frame
-                    self.stack_top = frame.base_slot;
-                    self.frame_count -= 1;
+                // =============================================================
+                // Calls and Structs
+                // =============================================================
 
-                    // Top-level frame, return the value
-                    if (self.frame_count == 0) {
-                        return ret_value;
-                    }
-
-                    // Push the return value on the stack of the caller
-                    self.push(ret_value);
-                    // Update the frame only if we are NOT at the top level
-                    frame = self.currentFrame();
-                },
                 .call => {
-                    // Read function arity
                     const arity = readU8(frame.chunk, &frame.ip);
-
-                    // Peak the callee to check if we can cast it to *FnObject
                     const base_slot = self.stack_top - 1 - arity;
                     const callee = self.stack[base_slot];
 
@@ -221,37 +263,31 @@ pub const Vm = struct {
                                 return error.ArityMismatch;
                             }
 
-                            // Push the frame
                             self.frames[self.frame_count] = .{
                                 .chunk = &fn_obj.chunk,
                                 .ip = 0,
                                 .base_slot = base_slot,
+                                .fn_index = callee.function,
                             };
                             self.frame_count += 1;
                             frame = self.currentFrame();
                         },
                         .native => {
-                            // Slice of the fn args
                             const arg0_idx = base_slot + 1;
                             const args = self.stack[arg0_idx .. arg0_idx + arity];
 
-                            // Call builtin function, remove the args and push the return value
                             const ret_value = callee.native.func(args, self.ctx);
                             self.stack_top = base_slot;
                             self.push(ret_value);
                         },
                         .struct_constructor => {
-                            // Stack: [ ..., constructor_value, arg0, arg1, ... ]
-                            //                    ^ base_slot
                             const struct_def_idx = callee.struct_constructor;
                             const def = self.program.struct_defs.items[struct_def_idx];
 
-                            // Check arity
                             if (def.field_names.len != arity) {
                                 return error.ArityMismatch;
                             }
 
-                            // Allocate args
                             const arg0_idx = base_slot + 1;
                             const args = self.stack[arg0_idx .. arg0_idx + def.field_names.len];
                             var field_values = try self.allocator.alloc(Value, args.len);
@@ -259,7 +295,6 @@ pub const Vm = struct {
                                 field_values[i] = arg;
                             }
 
-                            // Allocate body args
                             const body_field_values = try self.allocator.alloc(Value, def.body_field_names.len);
                             for (body_field_values) |*v| {
                                 v.* = Value.unit;
@@ -275,7 +310,6 @@ pub const Vm = struct {
                                 .kind = def.kind,
                             };
 
-                            // Reset stack top now that we consumed everything
                             self.stack_top = base_slot;
                             self.push(Value{ .struct_instance = instance });
                         },
@@ -283,17 +317,14 @@ pub const Vm = struct {
                     }
                 },
                 .get_field => {
-                    // Get field metadata
                     const field_idx = readU16(frame.chunk, &frame.ip);
                     const field_name = try getFieldNameFromConst(frame.chunk, field_idx);
 
-                    // Get instance
                     const instance = switch (self.pop()) {
                         .struct_instance => |si| si,
                         else => return error.TypeError,
                     };
 
-                    // Get field value
                     const field_meta = findField(instance, field_name) orelse return error.UndefinedField;
                     const field_value = if (field_meta.is_body)
                         instance.body_field_values[field_meta.index]
@@ -303,14 +334,11 @@ pub const Vm = struct {
                     self.push(field_value);
                 },
                 .set_field => {
-                    // Get struct
                     const field_idx = readU16(frame.chunk, &frame.ip);
                     const field_name = try getFieldNameFromConst(frame.chunk, field_idx);
 
-                    // Pop value
                     const value = self.pop();
 
-                    // Pop instance
                     const instance = switch (self.pop()) {
                         .struct_instance => |si| si,
                         else => return error.TypeError,
@@ -328,7 +356,6 @@ pub const Vm = struct {
                     const struct_def_idx = readU16(frame.chunk, &frame.ip);
                     const def = self.program.struct_defs.items[struct_def_idx];
 
-                    // Allocate field values
                     const field_values = try self.allocator.alloc(Value, def.field_names.len);
                     var i = def.field_names.len;
                     while (i > 0) {
@@ -336,7 +363,6 @@ pub const Vm = struct {
                         field_values[i] = self.pop();
                     }
 
-                    // Allocate body field values
                     const body_field_values = try self.allocator.alloc(Value, def.body_field_names.len);
                     i = def.body_field_names.len;
                     while (i > 0) {
@@ -344,7 +370,6 @@ pub const Vm = struct {
                         body_field_values[i] = Value.unit;
                     }
 
-                    // Create a push field instance
                     const instance = try self.allocator.create(Value.StructInstance);
                     instance.* = .{
                         .type_name = def.name,
@@ -425,5 +450,58 @@ pub const Vm = struct {
     // Returns the current call frame
     fn currentFrame(self: *Vm) *CallFrame {
         return &self.frames[self.frame_count - 1];
+    }
+
+    fn wrapResult(self: *Vm, ret_value: Value, result_name: []const u8) VmError!Value {
+        // Don't double-wrap an already-wrapped Result (e.g. propagated Err from try)
+        if (ret_value == .struct_instance and std.mem.startsWith(u8, ret_value.struct_instance.type_name, result_name)) {
+            return ret_value;
+        }
+
+        const bang_idx = std.mem.indexOf(u8, result_name, "!") orelse result_name.len;
+        const err_prefix = result_name[0..bang_idx];
+
+        // Raw return value of the fn is a struct that starts with our E prefix
+        if (ret_value == .struct_instance and std.mem.startsWith(u8, ret_value.struct_instance.type_name, err_prefix)) {
+            // Wrap in an Err struct
+            const type_name = try utils.memberName(self.allocator, result_name, types.RESULT_ERR_VARIANT);
+            const values = try self.allocator.alloc(Value, 1);
+            values[0] = ret_value;
+
+            const field_names = try self.allocator.alloc([]const u8, 1);
+            field_names[0] = "err";
+
+            const instance = try self.allocator.create(Value.StructInstance);
+            instance.* = .{
+                .type_name = type_name,
+                .field_names = field_names,
+                .field_values = values,
+                .body_field_names = &.{},
+                .body_field_values = &.{},
+                .kind = .case,
+            };
+
+            return Value{ .struct_instance = instance };
+        }
+
+        // If an Ok, wrap it and return the instance
+        const type_name = try utils.memberName(self.allocator, result_name, types.RESULT_OK_VARIANT);
+        const values = try self.allocator.alloc(Value, 1);
+        values[0] = ret_value;
+
+        const field_names = try self.allocator.alloc([]const u8, 1);
+        field_names[0] = types.FIELD_VALUE;
+
+        const instance = try self.allocator.create(Value.StructInstance);
+        instance.* = .{
+            .type_name = type_name,
+            .field_names = field_names,
+            .field_values = values,
+            .body_field_names = &.{},
+            .body_field_values = &.{},
+            .kind = .case,
+        };
+
+        return Value{ .struct_instance = instance };
     }
 };

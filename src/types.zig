@@ -4,10 +4,15 @@ const activeTag = std.meta.activeTag;
 const ast = @import("ast.zig");
 
 pub const SELF_TYPE = "Self";
-pub const RESULT_OK_VARIANT = "Ok";
-pub const RESULT_ERR_VARIANT = "Err";
+
 pub const METHOD_EQUALS = "equals";
 pub const METHOD_TO_STRING = "to_str";
+
+// For Ok/Err
+pub const RESULT_OK_VARIANT = "Ok";
+pub const RESULT_ERR_VARIANT = "Err";
+pub const FIELD_VALUE = "value";
+pub const FIELD_ERR = "err";
 
 pub const PipeType = union(enum) {
     int,

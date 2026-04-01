@@ -1,5 +1,8 @@
 const std = @import("std");
 
+const utils = @import("../utils.zig");
+const types = @import("../types.zig");
+
 const Chunk = @import("chunk.zig").Chunk;
 const ChunkError = @import("chunk.zig").ChunkError;
 const OpCode = @import("opcode.zig").OpCode;
@@ -100,10 +103,32 @@ pub const Compiler = struct {
     }
 
     fn compileFnDeclarationStatement(self: *Compiler, fn_decl: ast.Statement.FnDeclaration) CompileError!void {
+        // For fallible functions (return type E!T), compute the synthesized result enum
+        // name (e.g. MathError!Int) so that callUserFn can wrap the return value
+        // in the correct Ok/Err variant at runtime.
+        // For non fallible functions (no return type, or plain named return), this is null
+        const result_name: ?[]const u8 = if (fn_decl.return_type) |ret| switch (ret) {
+            .explicit_error_union => |eu| blk: {
+                // ok_type is a *PipeTypeAnnotation - switch on the pointee to extract the name.
+                // Complex ok types (nested error unions) are not supported yet
+                const ok_name: ?[]const u8 = switch (eu.ok_type.*) {
+                    .named => |tok| tok.lexeme,
+                    else => null,
+                };
+
+                if (ok_name) |name| {
+                    break :blk try utils.resultTypeName(self.allocator, eu.error_set.lexeme, name);
+                }
+                break :blk null;
+            },
+            else => null,
+        } else null;
+
         var fn_obj = FnObject{
             .name = fn_decl.name.lexeme,
             .arity = @intCast(fn_decl.params.len),
             .chunk = Chunk.init(self.allocator),
+            .result_name = result_name,
         };
 
         // Save compiler state
@@ -126,7 +151,7 @@ pub const Compiler = struct {
         }
 
         // Now, comile the body!
-        try self.compileStatements(fn_decl.body);
+        _ = try self.compileBody(fn_decl.body);
 
         // Implicit return in case the function falls through without an explicit return
         try self.emitOp(OpCode.@"return", fn_decl.name.line);
@@ -144,7 +169,7 @@ pub const Compiler = struct {
         // Declare the function name as a local (functions are first-class values)
         // If we are the the top-level, store as a global
         if (self.scope_depth == 0) {
-            const name_idx = try self.chunk.addConstant(.{ .string = fn_decl.name.lexeme });
+            const name_idx = try self.chunk.findOrAddConstant(.{ .string = fn_decl.name.lexeme });
             try self.emitOp(OpCode.define_global, fn_decl.name.line);
             try self.emitU16(name_idx, fn_decl.name.line);
         } else {
@@ -238,7 +263,8 @@ pub const Compiler = struct {
             .struct_init => |si| try self.compileStructInit(si),
             .field_access => |fa| try self.compileFieldAccess(fa),
             .field_assignment => |fa| try self.compileFieldAssignment(fa),
-            else => return error.UnsupportedNode,
+            .try_expr => |t| try self.compileTry(t),
+            .catch_expr => |c| try self.compileCatch(c),
         }
     }
 
@@ -301,7 +327,7 @@ pub const Compiler = struct {
             try self.emitOp(OpCode.get_local, variable.token.line);
             try self.emitU16(slot, variable.token.line);
         } else {
-            const idx = try self.chunk.addConstant(.{ .string = variable.token.lexeme });
+            const idx = try self.chunk.findOrAddConstant(.{ .string = variable.token.lexeme });
             try self.emitOp(OpCode.get_global, variable.token.line);
             try self.emitU16(idx, variable.token.line);
         }
@@ -317,27 +343,8 @@ pub const Compiler = struct {
 
     fn compileBlock(self: *Compiler, block: *const ast.Expression.Block) CompileError!void {
         self.beginScope();
-
-        // Because we will support braceless conditions,
-        // it's simpler to store the last statement as the end of the block
-        const line = if (block.statements.len > 0)
-            ast.statementLine(block.statements[block.statements.len - 1])
-        else
-            0;
-
-        var has_result = false;
-        for (block.statements, 0..) |statement, i| {
-            // If the last statement is an expression, we must *not* pop its result
-            // Compile it directly and let endScope handle it
-            if (i == block.statements.len - 1 and statement == .expression) {
-                try self.compileExpression(statement.expression);
-                has_result = true;
-            } else {
-                try self.compileStatement(statement);
-            }
-        }
-
-        try self.endScope(has_result, line);
+        const body_result = try self.compileBody(block.statements);
+        try self.endScope(body_result.has_result, body_result.line);
     }
 
     fn compileIf(self: *Compiler, if_expr: *const ast.Expression.If) CompileError!void {
@@ -416,7 +423,7 @@ pub const Compiler = struct {
 
         // Access a field
         try self.compileExpression(fa.object);
-        const name_idx = try self.chunk.addConstant(.{ .string = fa.name.lexeme });
+        const name_idx = try self.chunk.findOrAddConstant(.{ .string = fa.name.lexeme });
 
         try self.emitOp(OpCode.get_field, fa.name.line);
         try self.emitU16(name_idx, fa.name.line);
@@ -425,10 +432,91 @@ pub const Compiler = struct {
     fn compileFieldAssignment(self: *Compiler, fa: *const ast.Expression.FieldAssignment) CompileError!void {
         try self.compileExpression(fa.object);
         try self.compileExpression(fa.value);
-        const name_idx = try self.chunk.addConstant(.{ .string = fa.name.lexeme });
+        const name_idx = try self.chunk.findOrAddConstant(.{ .string = fa.name.lexeme });
 
         try self.emitOp(OpCode.set_field, fa.name.line);
         try self.emitU16(name_idx, fa.name.line);
+    }
+
+    fn compileTry(self: *Compiler, try_expr: *const ast.Expression.Try) CompileError!void {
+        // Pseudo-bytecode
+        // <compiler inner expression>          // [..., Result]
+        // match_variant "Ok" -> err_path       // match: [..., unwrapped], no match: jump
+        // jump -> done
+        // err_path:                            // [..., Result]
+        //   return                             // propagate Err to caller
+        // done:                                // [..., unwrapped_ok_value]
+
+        // Compile the expression
+        try self.compileExpression(try_expr.expression);
+
+        // Emit the match_variant "Ok" err_path (placeholder, future fail_jump address)
+        const line = try_expr.expression.line();
+        try self.emitOp(.match_variant, line);
+        const name_idx = try self.chunk.findOrAddConstant(.{ .string = types.RESULT_OK_VARIANT });
+        try self.emitU16(name_idx, line);
+
+        try self.emitU16(0xFFFF, line); // Placeholder for later backpatching
+        const fail_jump_offset = self.chunk.code.items.len - 2;
+
+        // Now the jump with done (placeholder)
+        const end_jump = try self.emitJump(OpCode.jump, line);
+        self.patchJump(fail_jump_offset);
+
+        // Emit the return for the err_path
+        try self.emitOp(.@"return", line);
+        self.patchJump(end_jump);
+    }
+
+    fn compileCatch(self: *Compiler, catch_expr: *const ast.Expression.Catch) CompileError!void {
+        // Pseudo-bytecode
+        // <compile expression>              // [..., Result]
+        // match_variant "Ok" → handler      // match: [..., unwrapped], no match: jump
+        // jump → done
+        // handler:                          // [..., Result] (the Err, untouched)
+        //   get_field "err"                 // [..., err_inner_value]
+        //   [if binding: declare local]
+        //   <compile handler expression>
+        // done:
+
+        // Compile the expression
+        try self.compileExpression(catch_expr.expression);
+
+        // Emit the match_variant "Ok" handler
+        const line = catch_expr.expression.line();
+        try self.emitOp(.match_variant, line);
+
+        const name_idx = try self.chunk.findOrAddConstant(.{ .string = types.RESULT_OK_VARIANT });
+        try self.emitU16(name_idx, line);
+
+        try self.emitU16(0xFFFF, line); // Placeholder for later backpatching
+        const handler_jump_offset = self.chunk.code.items.len - 2;
+
+        // Now the jump with done
+        const end_jump = try self.emitJump(OpCode.jump, line);
+        self.patchJump(handler_jump_offset);
+
+        // Emit the get_field "err"
+        if (catch_expr.binding) |binding| {
+            self.beginScope();
+            // Extract the inner error
+            try self.emitOp(OpCode.get_field, binding.line);
+            const err_name_idx = try self.chunk.findOrAddConstant(.{ .string = types.FIELD_ERR });
+            try self.emitU16(err_name_idx, binding.line);
+
+            try self.declareLocal(binding.lexeme);
+            try self.compileExpression(catch_expr.handler);
+
+            //
+            // true: handler produces a result
+            try self.endScope(true, binding.line);
+        } else {
+            // Discard the Err wrapper
+            try self.emitOp(OpCode.pop, line);
+            try self.compileExpression(catch_expr.handler);
+        }
+
+        self.patchJump(end_jump);
     }
 
     // NOTE: -- Helpers
@@ -450,7 +538,7 @@ pub const Compiler = struct {
     }
 
     fn emitConstant(self: *Compiler, value: Value, line: usize) CompileError!void {
-        const index = try self.chunk.addConstant(value);
+        const index = try self.chunk.findOrAddConstant(value);
         try self.emitOp(OpCode.constant, line);
         try self.emitU16(index, line);
     }
@@ -546,7 +634,11 @@ pub const Compiler = struct {
     }
 
     // Returns the qualified name EnumName.VariantName
-    fn buildEnumVariantQualifiedName(self: *Compiler, enum_name: []const u8, variant_name: []const u8) CompileError![]const u8 {
+    fn buildEnumVariantQualifiedName(
+        self: *Compiler,
+        enum_name: []const u8,
+        variant_name: []const u8,
+    ) CompileError![]const u8 {
         const type_name = try self.allocator.alloc(u8, enum_name.len + variant_name.len + 1);
         @memcpy(type_name[0..enum_name.len], enum_name);
         type_name[enum_name.len] = '.';
@@ -554,4 +646,34 @@ pub const Compiler = struct {
 
         return type_name;
     }
+
+    // Compiles a block of statement and leaves the last statement's result on the stack
+    fn compileBody(self: *Compiler, statements: []const ast.Statement) CompileError!BodyResult {
+        var has_result = false;
+
+        // Because we will support braceless conditions,
+        // it's simpler to store the last statement as the end of the block
+        var line: usize = 0;
+        for (statements, 0..) |statement, i| {
+            // If the last statement is an expression, we must *not* pop its result
+            // Compile it directly and let endScope handle it
+            if (i == statements.len - 1 and statement == .expression) {
+                try self.compileExpression(statement.expression);
+                has_result = true;
+            } else {
+                try self.compileStatement(statement);
+            }
+            line = ast.statementLine(statement);
+        }
+
+        return BodyResult{
+            .has_result = has_result,
+            .line = line,
+        };
+    }
+
+    const BodyResult = struct {
+        has_result: bool,
+        line: usize,
+    };
 };

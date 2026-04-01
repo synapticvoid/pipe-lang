@@ -884,10 +884,10 @@ pub const TypeChecker = struct {
 
                 // First, the field slices
                 const ok_fields = try self.allocator.alloc(types.FieldInfo, 1);
-                ok_fields[0] = .{ .name = "value", .pipe_type = ok_type.*, .mutability = .constant };
+                ok_fields[0] = .{ .name = types.FIELD_VALUE, .pipe_type = ok_type.*, .mutability = .constant };
 
                 const err_fields = try self.allocator.alloc(types.FieldInfo, 1);
-                err_fields[0] = .{ .name = "err", .pipe_type = .{ .enum_type = eu.error_set.lexeme }, .mutability = .constant };
+                err_fields[0] = .{ .name = types.FIELD_ERR, .pipe_type = .{ .enum_type = eu.error_set.lexeme }, .mutability = .constant };
 
                 // Then allocate the variant slice
                 const variants = try self.allocator.alloc(types.VariantTypeInfo, 2);

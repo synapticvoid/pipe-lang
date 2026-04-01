@@ -13,6 +13,9 @@ pub const FnObject = struct {
     name: []const u8,
     arity: u8,
     chunk: Chunk,
+    // Synthezised result enum name (e.g. MathError!Int) if fallible, null otherwise.
+    // Used at call time to wrap the return value in Ok or Err
+    result_name: ?[]const u8,
 };
 
 // Metadata used by `OpCode.construct` to materialize a runtime struct instance.

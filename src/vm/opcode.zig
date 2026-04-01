@@ -71,6 +71,12 @@ pub const OpCode = enum(u8) {
     // Stack: unchanged
     loop,
 
+    // Encoding: match_variant u16 u16
+    // Operands: name_const_idx: u16 (constant pool string), fail_jump: u16 (absolute IP)
+    // Stack (match): [..., instance] -> [..., unwrapped_value]
+    // Stack (no match): [..., instance] -> [..., instance] (jump to fail_jump)
+    match_variant,
+
     // Encoding: return
     // Operands: none
     // Stack: [..., value] -> caller frame receives value
