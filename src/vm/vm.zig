@@ -313,6 +313,24 @@ pub const Vm = struct {
                             self.stack_top = base_slot;
                             self.push(Value{ .struct_instance = instance });
                         },
+                        .bound_method => |bm| {
+                            const fn_obj: *const FnObject = &self.program.functions.items[bm.fn_idx];
+
+                            // - 1 because self is the first param, but we don't count it in the call-site arity
+                            if (fn_obj.arity - 1 != arity) {
+                                return error.ArityMismatch;
+                            }
+
+                            self.stack[base_slot] = .{ .struct_instance = bm.receiver };
+                            self.frames[self.frame_count] = .{
+                                .chunk = &fn_obj.chunk,
+                                .ip = 0,
+                                .base_slot = base_slot,
+                                .fn_index = bm.fn_idx,
+                            };
+                            self.frame_count += 1;
+                            frame = self.currentFrame();
+                        },
                         else => return error.NotCallable,
                     }
                 },
@@ -325,13 +343,29 @@ pub const Vm = struct {
                         else => return error.TypeError,
                     };
 
-                    const field_meta = findField(instance, field_name) orelse return error.UndefinedField;
-                    const field_value = if (field_meta.is_body)
-                        instance.body_field_values[field_meta.index]
-                    else
-                        instance.field_values[field_meta.index];
+                    const field_meta = findField(instance, field_name);
+                    if (field_meta) |meta| {
+                        const field_value = if (meta.is_body)
+                            instance.body_field_values[meta.index]
+                        else
+                            instance.field_values[meta.index];
 
-                    self.push(field_value);
+                        self.push(field_value);
+                    } else {
+                        // Build the qualified name to search for a bound method
+                        const qualified = try utils.memberName(self.allocator, instance.type_name, field_name);
+                        defer self.allocator.free(qualified);
+
+                        const val = self.globals.get(qualified) orelse return error.UndefinedField;
+                        if (val != .function) {
+                            return error.NotCallable;
+                        }
+
+                        self.push(.{ .bound_method = .{
+                            .fn_idx = val.function,
+                            .receiver = instance,
+                        } });
+                    }
                 },
                 .set_field => {
                     const field_idx = readU16(frame.chunk, &frame.ip);
@@ -431,13 +465,18 @@ pub const Vm = struct {
     }
 
     // Returns the field's metadata from its name
+    // A field can be:
+    // - a struct field
+    // - a struct body field
     fn findField(si: *Value.StructInstance, name: []const u8) ?struct { is_body: bool, index: usize } {
+        // Search through struct fields
         for (si.field_names, 0..) |field_name, i| {
             if (std.mem.eql(u8, field_name, name)) {
                 return .{ .is_body = false, .index = i };
             }
         }
 
+        // Search through body fields
         for (si.body_field_names, 0..) |body_name, i| {
             if (std.mem.eql(u8, body_name, name)) {
                 return .{ .is_body = true, .index = i };

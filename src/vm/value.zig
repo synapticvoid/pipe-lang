@@ -31,6 +31,8 @@ pub const Value = union(enum) {
     // transform(Color.Red); // Constructor is passed as a variable
     struct_constructor: u16,
 
+    bound_method: BoundMethod,
+
     pub const StructInstance = struct {
         type_name: []const u8,
         field_names: []const []const u8,
@@ -38,6 +40,11 @@ pub const Value = union(enum) {
         body_field_values: []Value,
         body_field_names: []const []const u8,
         kind: StructKind,
+    };
+
+    pub const BoundMethod = struct {
+        fn_idx: u16,
+        receiver: *StructInstance,
     };
 
     pub fn eql(self: Value, other: Value) bool {
@@ -80,6 +87,10 @@ pub const Value = union(enum) {
                 return true;
             },
             .struct_constructor => |a| a == other.struct_constructor,
+            .bound_method => |a| {
+                const b = other.bound_method;
+                return a.fn_idx == b.fn_idx and a.receiver == b.receiver;
+            },
         };
     }
 
@@ -101,6 +112,7 @@ pub const Value = union(enum) {
             .native,
             .struct_instance,
             .struct_constructor,
+            .bound_method,
             => true,
         };
     }
@@ -139,6 +151,7 @@ pub const Value = union(enum) {
                 }
             },
             .struct_constructor => |sc| try writer.print("constructor<{d}>", .{sc}),
+            .bound_method => |bm| try writer.print("method<{d}>", .{bm.fn_idx}),
         }
     }
 };
