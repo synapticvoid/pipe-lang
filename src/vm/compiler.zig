@@ -103,67 +103,8 @@ pub const Compiler = struct {
     }
 
     fn compileFnDeclarationStatement(self: *Compiler, fn_decl: ast.Statement.FnDeclaration) CompileError!void {
-        // For fallible functions (return type E!T), compute the synthesized result enum
-        // name (e.g. MathError!Int) so that callUserFn can wrap the return value
-        // in the correct Ok/Err variant at runtime.
-        // For non fallible functions (no return type, or plain named return), this is null
-        const result_name: ?[]const u8 = if (fn_decl.return_type) |ret| switch (ret) {
-            .explicit_error_union => |eu| blk: {
-                // ok_type is a *PipeTypeAnnotation - switch on the pointee to extract the name.
-                // Complex ok types (nested error unions) are not supported yet
-                const ok_name: ?[]const u8 = switch (eu.ok_type.*) {
-                    .named => |tok| tok.lexeme,
-                    else => null,
-                };
-
-                if (ok_name) |name| {
-                    break :blk try utils.resultTypeName(self.allocator, eu.error_set.lexeme, name);
-                }
-                break :blk null;
-            },
-            else => null,
-        } else null;
-
-        var fn_obj = FnObject{
-            .name = fn_decl.name.lexeme,
-            .arity = @intCast(fn_decl.params.len),
-            .chunk = Chunk.init(self.allocator),
-            .result_name = result_name,
-        };
-
-        // Save compiler state
-        const prev_chunk = self.chunk;
-        const prev_locals = self.locals;
-        const prev_scope_depth = self.scope_depth;
-
-        // Switch to the function's chunk
-        self.chunk = &fn_obj.chunk;
-        self.locals = .{};
-        self.scope_depth = 0;
-
-        // Reserve slot 0 for the function itself
-        // Useful for closures, methods, etc.
-        try self.declareLocal(fn_decl.name.lexeme);
-
-        // Declare function params as locals
-        for (fn_decl.params) |param| {
-            try self.declareLocal(param.name.lexeme);
-        }
-
-        // Now, comile the body!
-        _ = try self.compileBody(fn_decl.body);
-
-        // Implicit return in case the function falls through without an explicit return
-        try self.emitOp(OpCode.@"return", fn_decl.name.line);
-
-        // Restore compiler state
-        self.chunk = prev_chunk;
-        self.locals.deinit(self.allocator);
-        self.locals = prev_locals;
-        self.scope_depth = prev_scope_depth;
-
-        // Emit the fn object into the enclosing chunk
-        const fn_idx = try self.program.addFunction(fn_obj);
+        // Compile the FnObject
+        const fn_idx = try self.compileFnObject(fn_decl, fn_decl.name.lexeme, @intCast(fn_decl.params.len));
         try self.emitConstant(.{ .function = fn_idx }, fn_decl.name.line);
 
         // Declare the function name as a local (functions are first-class values)
@@ -188,6 +129,21 @@ pub const Compiler = struct {
         const body_field_names = try self.allocator.alloc([]const u8, struct_decl.body_fields.len);
         for (struct_decl.body_fields, 0..) |field, i| {
             body_field_names[i] = field.name.lexeme;
+        }
+
+        // Allocate methods
+        for (struct_decl.methods) |method| {
+            // Compile the FnObject
+            const method_idx = try self.compileFnObject(method, types.SELF_PARAMETER, @intCast(method.params.len + 1));
+            try self.emitConstant(.{ .function = method_idx }, method.name.line);
+
+            // Register the qualified name TypeName.methodName
+            // Not free'd because it will be owned by the chunk constants
+            const qualified = try utils.memberName(self.allocator, struct_decl.name.lexeme, method.name.lexeme);
+
+            const name_idx = try self.chunk.findOrAddConstant(.{ .string = qualified });
+            try self.emitOp(.define_global, method.name.line);
+            try self.emitU16(name_idx, method.name.line);
         }
 
         const struct_obj = StructDef{
@@ -672,6 +628,75 @@ pub const Compiler = struct {
         };
     }
 
+    // Compile a function/method body into a FnObject and return its program index
+    fn compileFnObject(
+        self: *Compiler,
+        fn_decl: ast.Statement.FnDeclaration,
+        slot_0_name: []const u8,
+        arity: u8,
+    ) CompileError!u16 {
+        // For fallible functions (return type E!T), compute the synthesized result enum
+        // name (e.g. MathError!Int) so that callUserFn can wrap the return value
+        // in the correct Ok/Err variant at runtime.
+        // For non fallible functions (no return type, or plain named return), this is null
+        const result_name: ?[]const u8 = if (fn_decl.return_type) |ret| switch (ret) {
+            .explicit_error_union => |eu| blk: {
+                // ok_type is a *PipeTypeAnnotation - switch on the pointee to extract the name.
+                // Complex ok types (nested error unions) are not supported yet
+                const ok_name: ?[]const u8 = switch (eu.ok_type.*) {
+                    .named => |tok| tok.lexeme,
+                    else => null,
+                };
+
+                if (ok_name) |name| {
+                    break :blk try utils.resultTypeName(self.allocator, eu.error_set.lexeme, name);
+                }
+                break :blk null;
+            },
+            else => null,
+        } else null;
+
+        var fn_obj = FnObject{
+            .name = fn_decl.name.lexeme,
+            .arity = arity,
+            .chunk = Chunk.init(self.allocator),
+            .result_name = result_name,
+        };
+
+        // Save compiler state
+        const prev_chunk = self.chunk;
+        const prev_locals = self.locals;
+        const prev_scope_depth = self.scope_depth;
+
+        // Switch to the function's chunk
+        self.chunk = &fn_obj.chunk;
+        self.locals = .{};
+        self.scope_depth = 0;
+
+        // Reserve slot 0 for the function (if a function)/self (if a method) itself
+        // Useful for closures, methods, etc.
+        try self.declareLocal(slot_0_name);
+
+        // Declare function params as locals
+        for (fn_decl.params) |param| {
+            try self.declareLocal(param.name.lexeme);
+        }
+
+        // Now, comile the body!
+        _ = try self.compileBody(fn_decl.body);
+
+        // Implicit return in case the function falls through without an explicit return
+        try self.emitOp(OpCode.@"return", fn_decl.name.line);
+
+        // Restore compiler state
+        self.chunk = prev_chunk;
+        self.locals.deinit(self.allocator);
+        self.locals = prev_locals;
+        self.scope_depth = prev_scope_depth;
+
+        // Emit the fn object into the enclosing chunk
+        return try self.program.addFunction(fn_obj);
+    }
     const BodyResult = struct {
         has_result: bool,
         line: usize,

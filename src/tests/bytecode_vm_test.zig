@@ -1313,3 +1313,205 @@ test "compiler: nested enum coercion" {
     try std.testing.expect(result.struct_instance.field_values[0] == .struct_instance);
     try std.testing.expectEqualStrings("Inner.A", result.struct_instance.field_values[0].struct_instance.type_name);
 }
+
+// ===========================================================================
+// Step 7: Method dispatch
+// ===========================================================================
+
+test "compiler: no-arg method reads self field" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    // struct Counter(const val: Int) {
+    //     fn get() { return self.val; }
+    // }
+    const fields = [_]ast.Statement.FieldDeclaration{
+        .{ .name = ident("val"), .type_annotation = dummyType(), .mutability = .constant, .default_value = null },
+    };
+
+    // Body: return self.val;
+    const self_fa = try allocator.create(ast.Expression.FieldAccess);
+    self_fa.* = .{ .object = .{ .variable = .{ .token = ident("self") } }, .name = ident("val") };
+    const ret_stmt = ast.Statement{ .@"return" = .{
+        .token = ident("return"),
+        .value = .{ .field_access = self_fa },
+    } };
+
+    const get_method = ast.Statement.FnDeclaration{
+        .name = ident("get"),
+        .params = &.{},
+        .return_type = null,
+        .body = &.{ret_stmt},
+    };
+
+    const struct_decl = ast.Statement{ .struct_declaration = .{
+        .name = ident("Counter"),
+        .fields = &fields,
+        .body_fields = &.{},
+        .kind = .plain,
+        .methods = &.{get_method},
+    } };
+
+    // const c = Counter(42);
+    const init_args = [_]ast.Expression{
+        .{ .literal = .{ .token = ident("42"), .value = .{ .int = 42 } } },
+    };
+    const si = try allocator.create(ast.Expression.StructInit);
+    si.* = .{ .name = ident("Counter"), .args = &init_args };
+    const var_decl = ast.Statement{ .var_declaration = .{
+        .name = ident("c"),
+        .type_annotation = null,
+        .initializer = .{ .struct_init = si },
+        .mutability = .constant,
+    } };
+
+    // c.get()
+    const method_fa = try allocator.create(ast.Expression.FieldAccess);
+    method_fa.* = .{ .object = .{ .variable = .{ .token = ident("c") } }, .name = ident("get") };
+    const call = try allocator.create(ast.Expression.FnCall);
+    call.* = .{ .callee = .{ .field_access = method_fa }, .args = &.{} };
+
+    const result = try runCompiled(allocator, &.{ struct_decl, var_decl }, .{ .fn_call = call });
+    try std.testing.expect(result.eql(.{ .int = 42 }));
+}
+
+test "compiler: method with extra argument" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    // struct Counter(const val: Int) {
+    //     fn add(n: Int) { return self.val + n; }
+    // }
+    const fields = [_]ast.Statement.FieldDeclaration{
+        .{ .name = ident("val"), .type_annotation = dummyType(), .mutability = .constant, .default_value = null },
+    };
+
+    // Body: return self.val + n;
+    const self_fa = try allocator.create(ast.Expression.FieldAccess);
+    self_fa.* = .{ .object = .{ .variable = .{ .token = ident("self") } }, .name = ident("val") };
+    const add_bin = try allocator.create(ast.Expression.Binary);
+    add_bin.* = .{
+        .left = .{ .field_access = self_fa },
+        .operator = .{ .type = .plus, .lexeme = "+", .line = 1 },
+        .right = .{ .variable = .{ .token = ident("n") } },
+    };
+    const ret_stmt = ast.Statement{ .@"return" = .{
+        .token = ident("return"),
+        .value = .{ .binary = add_bin },
+    } };
+
+    var add_params = [_]ast.Param{
+        .{ .name = ident("n"), .type_annotation = dummyType() },
+    };
+    const add_method = ast.Statement.FnDeclaration{
+        .name = ident("add"),
+        .params = &add_params,
+        .return_type = null,
+        .body = &.{ret_stmt},
+    };
+
+    const struct_decl = ast.Statement{ .struct_declaration = .{
+        .name = ident("Counter"),
+        .fields = &fields,
+        .body_fields = &.{},
+        .kind = .plain,
+        .methods = &.{add_method},
+    } };
+
+    // const c = Counter(10);
+    const init_args = [_]ast.Expression{
+        .{ .literal = .{ .token = ident("10"), .value = .{ .int = 10 } } },
+    };
+    const si = try allocator.create(ast.Expression.StructInit);
+    si.* = .{ .name = ident("Counter"), .args = &init_args };
+    const var_decl = ast.Statement{ .var_declaration = .{
+        .name = ident("c"),
+        .type_annotation = null,
+        .initializer = .{ .struct_init = si },
+        .mutability = .constant,
+    } };
+
+    // c.add(5)
+    const method_fa = try allocator.create(ast.Expression.FieldAccess);
+    method_fa.* = .{ .object = .{ .variable = .{ .token = ident("c") } }, .name = ident("add") };
+    const call_args = [_]ast.Expression{
+        .{ .literal = .{ .token = ident("5"), .value = .{ .int = 5 } } },
+    };
+    const call = try allocator.create(ast.Expression.FnCall);
+    call.* = .{ .callee = .{ .field_access = method_fa }, .args = &call_args };
+
+    const result = try runCompiled(allocator, &.{ struct_decl, var_decl }, .{ .fn_call = call });
+    try std.testing.expect(result.eql(.{ .int = 15 }));
+}
+
+test "compiler: method dispatches to correct receiver" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    // struct Counter(const val: Int) {
+    //     fn get() { return self.val; }
+    // }
+    // Two instances — verify self is bound to the right one.
+    const fields = [_]ast.Statement.FieldDeclaration{
+        .{ .name = ident("val"), .type_annotation = dummyType(), .mutability = .constant, .default_value = null },
+    };
+
+    const self_fa = try allocator.create(ast.Expression.FieldAccess);
+    self_fa.* = .{ .object = .{ .variable = .{ .token = ident("self") } }, .name = ident("val") };
+    const ret_stmt = ast.Statement{ .@"return" = .{
+        .token = ident("return"),
+        .value = .{ .field_access = self_fa },
+    } };
+    const get_method = ast.Statement.FnDeclaration{
+        .name = ident("get"),
+        .params = &.{},
+        .return_type = null,
+        .body = &.{ret_stmt},
+    };
+
+    const struct_decl = ast.Statement{ .struct_declaration = .{
+        .name = ident("Counter"),
+        .fields = &fields,
+        .body_fields = &.{},
+        .kind = .plain,
+        .methods = &.{get_method},
+    } };
+
+    // const a = Counter(1);
+    const a_args = [_]ast.Expression{
+        .{ .literal = .{ .token = ident("1"), .value = .{ .int = 1 } } },
+    };
+    const a_si = try allocator.create(ast.Expression.StructInit);
+    a_si.* = .{ .name = ident("Counter"), .args = &a_args };
+    const a_decl = ast.Statement{ .var_declaration = .{
+        .name = ident("a"),
+        .type_annotation = null,
+        .initializer = .{ .struct_init = a_si },
+        .mutability = .constant,
+    } };
+
+    // const b = Counter(99);
+    const b_args = [_]ast.Expression{
+        .{ .literal = .{ .token = ident("99"), .value = .{ .int = 99 } } },
+    };
+    const b_si = try allocator.create(ast.Expression.StructInit);
+    b_si.* = .{ .name = ident("Counter"), .args = &b_args };
+    const b_decl = ast.Statement{ .var_declaration = .{
+        .name = ident("b"),
+        .type_annotation = null,
+        .initializer = .{ .struct_init = b_si },
+        .mutability = .constant,
+    } };
+
+    // b.get() → 99 (not 1)
+    const method_fa = try allocator.create(ast.Expression.FieldAccess);
+    method_fa.* = .{ .object = .{ .variable = .{ .token = ident("b") } }, .name = ident("get") };
+    const call = try allocator.create(ast.Expression.FnCall);
+    call.* = .{ .callee = .{ .field_access = method_fa }, .args = &.{} };
+
+    const result = try runCompiled(allocator, &.{ struct_decl, a_decl, b_decl }, .{ .fn_call = call });
+    try std.testing.expect(result.eql(.{ .int = 99 }));
+}

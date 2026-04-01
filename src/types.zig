@@ -4,6 +4,7 @@ const activeTag = std.meta.activeTag;
 const ast = @import("ast.zig");
 
 pub const SELF_TYPE = "Self";
+pub const SELF_PARAMETER = "self";
 
 pub const METHOD_EQUALS = "equals";
 pub const METHOD_TO_STRING = "to_str";
