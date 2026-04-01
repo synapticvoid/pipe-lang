@@ -20,8 +20,8 @@ pub const VmError = error{
     UndefinedVariable,
 };
 
-const MAX_STACK = 256;
-const MAX_FRAMES = 64;
+const MAX_STACK = 1024;
+const MAX_FRAMES = 256;
 
 const CallFrame = struct {
     chunk: *const Chunk,
