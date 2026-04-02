@@ -3,6 +3,16 @@ const activeTag = std.meta.activeTag;
 const RuntimeContext = @import("../runtime.zig").RuntimeContext;
 const StructKind = @import("../ast.zig").StructKind;
 
+pub const VmError = error{
+    ArityMismatch,
+    DivisionByZero,
+    NotCallable, // Not a function/method that we can call
+    OutOfMemory,
+    TypeError, // wrong types for arithmetic/negate/table
+    UndefinedField,
+    UndefinedVariable,
+};
+
 pub const Value = union(enum) {
     int: i64,
     string: []const u8,
@@ -157,9 +167,31 @@ pub const Value = union(enum) {
 };
 
 pub const NativeFn = struct {
-    pub const Func = *const fn (args: []const Value, ctx: RuntimeContext) Value;
+    pub const Func = *const fn (args: []const Value, ctx: RuntimeContext, caller: Caller) VmError!Value;
 
     name: []const u8,
     arity: ?u8, // null = variadic
     func: Func,
+};
+
+// Interface to abstract the VM from a native function call
+// The goal is the let a native function call a VM function without leaking the VM state.
+pub const Caller = struct {
+    // VM pointer
+    ptr: *anyopaque,
+
+    // Function pointers
+    // Call a VM function
+    call_ptr: *const fn (ptr: *anyopaque, callable: Value, args: []const Value) VmError!Value,
+
+    // Resolve a VM function by name
+    resolve_method_ptr: *const fn (ptr: *anyopaque, instance: *Value.StructInstance, name: []const u8) VmError!?Value,
+
+    pub fn call(self: Caller, callable: Value, args: []const Value) VmError!Value {
+        return self.call_ptr(self.ptr, callable, args);
+    }
+
+    pub fn resolveMethod(self: Caller, instance: *Value.StructInstance, name: []const u8) VmError!?Value {
+        return self.resolve_method_ptr(self.ptr, instance, name);
+    }
 };

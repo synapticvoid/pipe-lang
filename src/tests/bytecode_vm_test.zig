@@ -1715,3 +1715,129 @@ test "compiler: custom equals method overrides default comparison" {
     const result = try runCompiled(allocator, &.{ struct_decl, a_decl, b_decl }, .{ .binary = eq });
     try std.testing.expect(result.eql(.{ .boolean = true }));
 }
+
+fn runCompiledCapturingOutput(
+    allocator: std.mem.Allocator,
+    statements: []const ast.Statement,
+    final_expr: ast.Expression,
+) !struct { result: Value, output: []const u8 } {
+    var program = Program.init(allocator);
+    defer program.deinit();
+
+    var compiler = Compiler.init(&program, allocator);
+    defer compiler.deinit();
+
+    for (statements) |stmt| {
+        try compiler.compileStatement(stmt);
+    }
+    try compiler.compileExpression(final_expr);
+    try compiler.emitReturn(1);
+
+    var buf = std.Io.Writer.Allocating.init(allocator);
+    defer buf.deinit();
+    const ctx = RuntimeContext{ .writer = &buf.writer };
+    var vm = Vm.init(&program, ctx, allocator);
+    defer vm.deinit();
+    try pipe.vm.builtins.registerAll(&vm.globals, allocator);
+
+    const result = try vm.run();
+    return .{ .result = result, .output = try buf.toOwnedSlice() };
+}
+
+test "print: uses to_str method on struct instance" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    // struct Point(const x: Int, const y: Int) {
+    //     fn to_str() { return "a point"; }
+    // }
+    const fields = [_]ast.Statement.FieldDeclaration{
+        .{ .name = ident("x"), .type_annotation = dummyType(), .mutability = .constant, .default_value = null },
+        .{ .name = ident("y"), .type_annotation = dummyType(), .mutability = .constant, .default_value = null },
+    };
+    const ret_stmt = ast.Statement{ .@"return" = .{
+        .token = ident("return"),
+        .value = .{ .literal = .{ .token = ident("a point"), .value = .{ .string = "a point" } } },
+    } };
+    const to_str_method = ast.Statement.FnDeclaration{
+        .name = ident("to_str"),
+        .params = &.{},
+        .return_type = null,
+        .body = &.{ret_stmt},
+    };
+    const struct_decl = ast.Statement{ .struct_declaration = .{
+        .name = ident("Point"),
+        .fields = fields[0..],
+        .body_fields = &.{},
+        .kind = .plain,
+        .methods = &.{to_str_method},
+    } };
+
+    // var p = Point(1, 2);
+    const init_args = [_]ast.Expression{
+        .{ .literal = .{ .token = ident("1"), .value = .{ .int = 1 } } },
+        .{ .literal = .{ .token = ident("2"), .value = .{ .int = 2 } } },
+    };
+    const si = try allocator.create(ast.Expression.StructInit);
+    si.* = .{ .name = ident("Point"), .args = init_args[0..] };
+    const var_decl = ast.Statement{ .var_declaration = .{
+        .name = ident("p"),
+        .type_annotation = null,
+        .initializer = .{ .struct_init = si },
+        .mutability = .constant,
+    } };
+
+    // print(p)
+    const print_args = [_]ast.Expression{.{ .variable = .{ .token = ident("p") } }};
+    const print_call = try allocator.create(ast.Expression.FnCall);
+    print_call.* = .{
+        .callee = .{ .variable = .{ .token = ident("print") } },
+        .args = print_args[0..],
+    };
+
+    const out = try runCompiledCapturingOutput(allocator, &.{ struct_decl, var_decl }, .{ .fn_call = print_call });
+    try std.testing.expectEqualStrings("a point\n", out.output);
+}
+
+test "print: falls back to default format when no to_str method" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    // struct Plain(const x: Int) {}  -- no to_str
+    const fields = [_]ast.Statement.FieldDeclaration{
+        .{ .name = ident("x"), .type_annotation = dummyType(), .mutability = .constant, .default_value = null },
+    };
+    const struct_decl = ast.Statement{ .struct_declaration = .{
+        .name = ident("Plain"),
+        .fields = fields[0..],
+        .body_fields = &.{},
+        .kind = .plain,
+        .methods = &.{},
+    } };
+
+    // var p = Plain(42);
+    const init_args = [_]ast.Expression{
+        .{ .literal = .{ .token = ident("42"), .value = .{ .int = 42 } } },
+    };
+    const si = try allocator.create(ast.Expression.StructInit);
+    si.* = .{ .name = ident("Plain"), .args = init_args[0..] };
+    const var_decl = ast.Statement{ .var_declaration = .{
+        .name = ident("p"),
+        .type_annotation = null,
+        .initializer = .{ .struct_init = si },
+        .mutability = .constant,
+    } };
+
+    // print(p)
+    const print_args = [_]ast.Expression{.{ .variable = .{ .token = ident("p") } }};
+    const print_call = try allocator.create(ast.Expression.FnCall);
+    print_call.* = .{
+        .callee = .{ .variable = .{ .token = ident("print") } },
+        .args = print_args[0..],
+    };
+
+    const out = try runCompiledCapturingOutput(allocator, &.{ struct_decl, var_decl }, .{ .fn_call = print_call });
+    try std.testing.expectEqualStrings("<Plain>\n", out.output);
+}
