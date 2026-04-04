@@ -30,24 +30,29 @@ pub const CompileError = error{
 } || ChunkError;
 
 pub const Compiler = struct {
+    // Used for compiling function and handling closures
+    enclosing: ?*Compiler,
     program: *Program,
     chunk: *Chunk,
     locals: std.ArrayList(Local),
     scope_depth: u32,
     // Set of declared enum type names; used to detect when a zero-field variant references
     // an existing enum (nested enum coercion at runtime)
-    known_enum_names: std.StringHashMapUnmanaged(void),
+    known_enum_names: *std.StringHashMapUnmanaged(void),
     allocator: std.mem.Allocator,
 
     // Static entry point to compile statements to a Program
     pub fn compile(statements: []const ast.Statement, allocator: std.mem.Allocator) CompileError!Program {
         var program = Program.init(allocator);
+        const known_enum_names = std.StringHashMapUnmanaged(void);
+
         var compiler = Compiler{
+            .enclosing = null,
             .program = &program,
             .chunk = &program.chunk,
             .locals = .{},
             .scope_depth = 0,
-            .known_enum_names = .{},
+            .known_enum_names = &known_enum_names,
             .allocator = allocator,
         };
         errdefer compiler.deinit();
@@ -57,20 +62,24 @@ pub const Compiler = struct {
         return program;
     }
 
-    pub fn init(program: *Program, allocator: std.mem.Allocator) Compiler {
+    pub fn init(
+        program: *Program,
+        known_enum_names: *std.StringHashMapUnmanaged(void),
+        allocator: std.mem.Allocator,
+    ) Compiler {
         return .{
+            .enclosing = null,
             .program = program,
             .chunk = &program.chunk,
             .locals = .{},
             .scope_depth = 0,
-            .known_enum_names = .{},
+            .known_enum_names = known_enum_names,
             .allocator = allocator,
         };
     }
 
     pub fn deinit(self: *Compiler) void {
         self.locals.deinit(self.allocator);
-        self.known_enum_names.deinit(self.allocator);
     }
 
     // NOTE: -- Statements
@@ -663,36 +672,32 @@ pub const Compiler = struct {
             .result_name = result_name,
         };
 
-        // Save compiler state
-        const prev_chunk = self.chunk;
-        const prev_locals = self.locals;
-        const prev_scope_depth = self.scope_depth;
-
-        // Switch to the function's chunk
-        self.chunk = &fn_obj.chunk;
-        self.locals = .{};
-        self.scope_depth = 0;
+        // Create nested compiler
+        var child = Compiler{
+            .enclosing = self,
+            .program = self.program,
+            .chunk = &fn_obj.chunk,
+            .locals = .{},
+            .scope_depth = 0,
+            .known_enum_names = self.known_enum_names, // Share the same map
+            .allocator = self.allocator,
+        };
 
         // Reserve slot 0 for the function (if a function)/self (if a method) itself
         // Useful for closures, methods, etc.
-        try self.declareLocal(slot_0_name);
+        try child.declareLocal(slot_0_name);
 
         // Declare function params as locals
         for (fn_decl.params) |param| {
-            try self.declareLocal(param.name.lexeme);
+            try child.declareLocal(param.name.lexeme);
         }
 
         // Now, comile the body!
-        _ = try self.compileBody(fn_decl.body);
+        _ = try child.compileBody(fn_decl.body);
 
         // Implicit return in case the function falls through without an explicit return
-        try self.emitOp(OpCode.@"return", fn_decl.name.line);
-
-        // Restore compiler state
-        self.chunk = prev_chunk;
-        self.locals.deinit(self.allocator);
-        self.locals = prev_locals;
-        self.scope_depth = prev_scope_depth;
+        try child.emitOp(OpCode.@"return", fn_decl.name.line);
+        child.locals.deinit(self.allocator);
 
         // Emit the fn object into the enclosing chunk
         return try self.program.addFunction(fn_obj);

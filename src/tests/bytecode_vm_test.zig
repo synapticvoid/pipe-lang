@@ -971,7 +971,8 @@ fn runCompiled(
     var program = Program.init(allocator);
     defer program.deinit();
 
-    var compiler = Compiler.init(&program, allocator);
+    var known_enum_names: std.StringHashMapUnmanaged(void) = .{};
+    var compiler = Compiler.init(&program, &known_enum_names, allocator);
     defer compiler.deinit();
 
     for (statements) |stmt| {
@@ -1724,7 +1725,8 @@ fn runCompiledCapturingOutput(
     var program = Program.init(allocator);
     defer program.deinit();
 
-    var compiler = Compiler.init(&program, allocator);
+    var known_enum_names: std.StringHashMapUnmanaged(void) = .{};
+    var compiler = Compiler.init(&program, &known_enum_names, allocator);
     defer compiler.deinit();
 
     for (statements) |stmt| {
