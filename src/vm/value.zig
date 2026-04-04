@@ -43,6 +43,8 @@ pub const Value = union(enum) {
 
     bound_method: BoundMethod,
 
+    closure: *ObjClosure,
+
     pub const StructInstance = struct {
         type_name: []const u8,
         field_names: []const []const u8,
@@ -55,6 +57,33 @@ pub const Value = union(enum) {
     pub const BoundMethod = struct {
         fn_idx: u16,
         receiver: *StructInstance,
+    };
+
+    // A closure: a function paired with its captured variables.
+    //
+    // upvalues is a flat array indexed by the upvalue slot the compiler emits.
+    // Each entry points to an ObjUpvalue which may be open (on-stack) or closed (self-contained)
+    pub const ObjClosure = struct {
+        fn_index: u16,
+        upvalues: []?*ObjUpvalue,
+    };
+
+    // Runtime representation of a captured variable (upvalue).
+    //
+    // Upvalues have 2 states:
+    // - Open: the variable still lives on the stack. location points into the stack slot.
+    // - Closed: the owning function has returned. The value is moved into closed
+    //   and locastion is repointed to &self.closed
+    //
+    //   Reads and writes always go through location, so both states are transparent.
+    //   next links all open upvalues in a VM-managed list for efficient closing at scope exit
+    pub const ObjUpvalue = struct {
+        // Points into the stack when open
+        location: *Value,
+        // holds the value after closing
+        closed: Value,
+        // linked list for open upvalues
+        next: ?*ObjUpvalue,
     };
 
     pub fn eql(self: Value, other: Value) bool {
@@ -101,6 +130,7 @@ pub const Value = union(enum) {
                 const b = other.bound_method;
                 return a.fn_idx == b.fn_idx and a.receiver == b.receiver;
             },
+            .closure => |c| c == other.closure,
         };
     }
 
@@ -123,6 +153,7 @@ pub const Value = union(enum) {
             .struct_instance,
             .struct_constructor,
             .bound_method,
+            .closure,
             => true,
         };
     }
@@ -162,6 +193,7 @@ pub const Value = union(enum) {
             },
             .struct_constructor => |sc| try writer.print("constructor<{d}>", .{sc}),
             .bound_method => |bm| try writer.print("method<{d}>", .{bm.fn_idx}),
+            .closure => |c| try writer.print("closure<{d}>", .{c.fn_index}),
         }
     }
 };

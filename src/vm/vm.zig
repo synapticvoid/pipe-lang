@@ -26,6 +26,7 @@ const CallFrame = union(enum) {
         ip: usize,
         base_slot: usize, // Where this frame's locals start on the value stack
         fn_index: ?u16, // Index of the current function. Used to check FnObject.result_name
+        closure: ?*Value.ObjClosure, // null for top-level and plain function calls
     };
 
     pub const Native = struct {
@@ -57,6 +58,8 @@ pub const Vm = struct {
     // name -> value
     globals: std.StringHashMapUnmanaged(Value),
 
+    open_upvalues: ?*Value.ObjUpvalue,
+
     ctx: RuntimeContext,
 
     allocator: std.mem.Allocator,
@@ -69,6 +72,7 @@ pub const Vm = struct {
             .frames = undefined,
             .frame_count = 0,
             .globals = .{},
+            .open_upvalues = null,
             .ctx = ctx,
             .allocator = allocator,
         };
@@ -85,6 +89,7 @@ pub const Vm = struct {
             .ip = 0,
             .base_slot = 0,
             .fn_index = null,
+            .closure = null,
         } };
         self.frame_count = 1;
         return self.executeUntil(0);
@@ -140,6 +145,7 @@ pub const Vm = struct {
                                 .ip = 0,
                                 .base_slot = base_slot,
                                 .fn_index = method_idx,
+                                .closure = null,
                             } };
                             self.frame_count += 1;
                             frame = &self.currentFrame().bytecode;
@@ -214,6 +220,9 @@ pub const Vm = struct {
                 // Variables
                 .get_local => self.executeGetLocal(frame),
                 .set_local => self.executeSetLocal(frame),
+                .get_upvalue => self.executeGetUpvalue(frame),
+                .set_upvalue => self.executeSetUpvalue(frame),
+                .close_upvalue => self.executeCloseUpvalue(),
                 .get_global => try self.executeGetGlobal(frame),
                 .set_global => try self.executeSetGlobal(frame),
                 .define_global => try self.executeDefineGlobal(frame),
@@ -233,6 +242,7 @@ pub const Vm = struct {
                 .get_field => try self.executeGetField(frame),
                 .set_field => try self.executeSetField(frame),
                 .construct => try self.executeConstruct(frame),
+                .closure => try self.executeClosure(frame),
             }
         }
 
@@ -267,7 +277,7 @@ pub const Vm = struct {
         const fail_jump = readU16(frame.chunk, &frame.ip);
         const variant_name = try getFieldNameFromConst(frame.chunk, name_idx);
 
-        const top = self.stack[self.stack_top - 1];
+        const top = self.peek();
         if (top == .struct_instance) {
             const type_name = top.struct_instance.type_name;
             if (utils.isVariant(type_name, variant_name)) {
@@ -287,7 +297,24 @@ pub const Vm = struct {
 
     inline fn executeSetLocal(self: *Vm, frame: *CallFrame.Bytecode) void {
         const idx = frame.base_slot + readU16(frame.chunk, &frame.ip);
-        self.stack[idx] = self.stack[self.stack_top - 1];
+        self.stack[idx] = self.peek();
+    }
+
+    inline fn executeGetUpvalue(self: *Vm, frame: *CallFrame.Bytecode) void {
+        const idx = readU16(frame.chunk, &frame.ip);
+        const upvalue = frame.closure.?.upvalues[idx].?;
+        self.push(upvalue.location.*);
+    }
+
+    inline fn executeSetUpvalue(self: *Vm, frame: *CallFrame.Bytecode) void {
+        const idx = readU16(frame.chunk, &frame.ip);
+        const upvalue = frame.closure.?.upvalues[idx].?;
+        upvalue.location.* = self.peek();
+    }
+
+    inline fn executeCloseUpvalue(self: *Vm) void {
+        self.closeUpvalues(self.stack_top - 1);
+        _ = self.pop();
     }
 
     inline fn executeGetGlobal(self: *Vm, frame: *CallFrame.Bytecode) VmError!void {
@@ -301,7 +328,7 @@ pub const Vm = struct {
         const name = frame.chunk.constants.items[idx].string;
 
         if (self.globals.getPtr(name)) |ptr| {
-            ptr.* = self.stack[self.stack_top - 1];
+            ptr.* = self.peek();
         } else {
             return error.UndefinedVariable;
         }
@@ -399,18 +426,19 @@ pub const Vm = struct {
         const struct_def_idx = readU16(frame.chunk, &frame.ip);
         const def = self.program.struct_defs.items[struct_def_idx];
 
+        // Pop body field values first (they sit on top of constructor args)
+        const body_field_values = try self.allocator.alloc(Value, def.body_field_names.len);
+        var i = def.body_field_names.len;
+        while (i > 0) {
+            i -= 1;
+            body_field_values[i] = self.pop();
+        }
+
         const field_values = try self.allocator.alloc(Value, def.field_names.len);
-        var i = def.field_names.len;
+        i = def.field_names.len;
         while (i > 0) {
             i -= 1;
             field_values[i] = self.pop();
-        }
-
-        const body_field_values = try self.allocator.alloc(Value, def.body_field_names.len);
-        i = def.body_field_names.len;
-        while (i > 0) {
-            i -= 1;
-            body_field_values[i] = Value.unit;
         }
 
         const instance = try self.allocator.create(Value.StructInstance);
@@ -423,6 +451,36 @@ pub const Vm = struct {
             .kind = def.kind,
         };
         self.push(.{ .struct_instance = instance });
+    }
+
+    inline fn executeClosure(self: *Vm, frame: *CallFrame.Bytecode) VmError!void {
+        const fn_idx = readU16(frame.chunk, &frame.ip);
+        const fn_obj = self.program.functions.items[fn_idx];
+        const upvalue_count = fn_obj.upvalue_count;
+
+        // Allocate the closture and its upvalue array
+        const closure = try self.allocator.create(Value.ObjClosure);
+        const upvalue_ptrs = try self.allocator.alloc(?*Value.ObjUpvalue, upvalue_count);
+        closure.* = .{
+            .fn_index = fn_idx,
+            .upvalues = upvalue_ptrs,
+        };
+
+        // Read each upvalue descriptor and its upvalue array
+        for (0..upvalue_count) |i| {
+            const is_local = readU8(frame.chunk, &frame.ip) == 1;
+            const upvalue_idx = readU16(frame.chunk, &frame.ip);
+
+            if (is_local) {
+                // Capture a local from the enclosing frame's stack
+                upvalue_ptrs[i] = try self.captureUpvalue(frame.base_slot + upvalue_idx);
+            } else {
+                // Reuse an upvalue from the enclosing closure
+                upvalue_ptrs[i] = frame.closure.?.upvalues[upvalue_idx];
+            }
+        }
+
+        self.push(.{ .closure = closure });
     }
 
     // NOTE: -- Helpers
@@ -438,6 +496,12 @@ pub const Vm = struct {
         std.debug.assert(self.stack_top > 0);
         self.stack_top -= 1;
         return self.stack[self.stack_top];
+    }
+
+    // Peeks the value from the stack
+    fn peek(self: *Vm) Value {
+        std.debug.assert(self.stack_top > 0);
+        return self.stack[self.stack_top - 1];
     }
 
     // Read a 8-bit value from the code
@@ -502,6 +566,59 @@ pub const Vm = struct {
         }
 
         return symbol.function;
+    }
+
+    // Returns an open upvalue pointing to the given stack slot.
+    // If one already exists (another closure captured the same variable), reuse it.
+    // Otherwisem create a new one a insert it into the sorted open upvalue list.
+    fn captureUpvalue(self: *Vm, stack_idx: usize) VmError!*Value.ObjUpvalue {
+        // Walk the open upvalue list to see if this slot is already captured
+        var prev: ?*Value.ObjUpvalue = null;
+        var current = self.open_upvalues;
+        while (current) |uv| {
+            // List is sorted by stack index (descending), stop if we passed it
+            if (@intFromPtr(uv.location) <= @intFromPtr(&self.stack[stack_idx])) {
+                break;
+            }
+            prev = uv;
+            current = uv.next;
+        }
+
+        // If already captured, reuse it
+        if (current) |uv| {
+            if (uv.location == &self.stack[stack_idx]) {
+                return uv;
+            }
+        }
+
+        // Create a new open upvalue
+        const upvalue = try self.allocator.create(Value.ObjUpvalue);
+        upvalue.* = .{
+            .location = &self.stack[stack_idx],
+            .closed = .null,
+            .next = current,
+        };
+
+        // Insert into the sorted linked list
+        if (prev) |p| {
+            p.next = upvalue;
+        } else {
+            self.open_upvalues = upvalue;
+        }
+
+        return upvalue;
+    }
+
+    fn closeUpvalues(self: *Vm, last_slot: usize) void {
+        while (self.open_upvalues) |uv| {
+            if (@intFromPtr(uv.location) < @intFromPtr(&self.stack[last_slot])) {
+                break;
+            }
+            // Move the value into closed and repoint location
+            uv.closed = uv.location.*;
+            uv.location = &uv.closed;
+            self.open_upvalues = uv.next;
+        }
     }
 
     // Returns the current call frame
@@ -632,6 +749,22 @@ pub const Vm = struct {
                     .ip = 0,
                     .base_slot = base_slot,
                     .fn_index = fn_idx,
+                    .closure = null,
+                } };
+                self.frame_count += 1;
+            },
+            .closure => |cl| {
+                const fn_obj: *const FnObject = &self.program.functions.items[cl.fn_index];
+                if (fn_obj.arity != arity) {
+                    return error.ArityMismatch;
+                }
+
+                self.frames[self.frame_count] = .{ .bytecode = .{
+                    .chunk = &fn_obj.chunk,
+                    .ip = 0,
+                    .base_slot = base_slot,
+                    .fn_index = cl.fn_index,
+                    .closure = cl,
                 } };
                 self.frame_count += 1;
             },
@@ -653,6 +786,7 @@ pub const Vm = struct {
                     .ip = 0,
                     .base_slot = base_slot,
                     .fn_index = bm.fn_idx,
+                    .closure = null,
                 } };
                 self.frame_count += 1;
             },

@@ -16,6 +16,7 @@ pub const FnObject = struct {
     // Synthezised result enum name (e.g. MathError!Int) if fallible, null otherwise.
     // Used at call time to wrap the return value in Ok or Err
     result_name: ?[]const u8,
+    upvalue_count: u8,
 };
 
 // Metadata used by `OpCode.construct` to materialize a runtime struct instance.
@@ -29,7 +30,6 @@ pub const StructDef = struct {
     field_names: []const []const u8,
     body_field_names: []const []const u8,
     kind: StructKind,
-    body_default_fn: ?u16,
 };
 
 pub const Program = struct {

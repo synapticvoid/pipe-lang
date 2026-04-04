@@ -60,6 +60,7 @@ pub fn disassembleInstruction(writer: anytype, chunk: *const Chunk, offset: usiz
         .null,
         .unit,
         .pop,
+        .close_upvalue,
         .@"return",
         => {
             try writer.print("{s}\n", .{@tagName(op)});
@@ -118,6 +119,8 @@ pub fn disassembleInstruction(writer: anytype, chunk: *const Chunk, offset: usiz
         .loop,
         .get_local,
         .set_local,
+        .get_upvalue,
+        .set_upvalue,
         .construct,
         => {
             if (offset + 2 >= chunk.code.items.len) {
@@ -134,6 +137,14 @@ pub fn disassembleInstruction(writer: anytype, chunk: *const Chunk, offset: usiz
         // =========================================================================
         // Two u16 operands (name_const_idx + fail_jump)
         // =========================================================================
+
+        // TODO: closure has variable-length encoding (fn_idx + upvalue descriptors)
+        // For now, just print fn_idx. Proper disassembly needs access to FnObject.upvalue_count.
+        .closure => {
+            const fn_idx = @as(u16, chunk.code.items[offset + 1]) << 8 | chunk.code.items[offset + 2];
+            try writer.print("{s} fn:{d}\n", .{ @tagName(op), fn_idx });
+            return offset + 3;
+        },
 
         .match_variant => {
             if (offset + 4 >= chunk.code.items.len) {

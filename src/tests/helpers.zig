@@ -50,7 +50,8 @@ pub fn evaluateVm(source: []const u8, allocator: std.mem.Allocator) !VmEvalResul
     defer program.deinit();
 
     var known_enum_names: std.StringHashMapUnmanaged(void) = .{};
-    var compiler = pipe.vm.Compiler.init(&program, &known_enum_names, allocator);
+    var body_defaults: std.StringHashMapUnmanaged([]const pipe.ast.Expression) = .{};
+    var compiler = pipe.vm.Compiler.init(&program, &known_enum_names, &body_defaults, allocator);
     defer compiler.deinit();
 
     // Compile all statements, but for the last expression statement

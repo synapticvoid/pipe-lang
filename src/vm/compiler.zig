@@ -15,10 +15,22 @@ const StructDef = prg.StructDef;
 const ast = @import("../ast.zig");
 const Value = @import("value.zig").Value;
 
+// Local variable
+// We store its name and nesting depth
 const Local = struct {
     name: []const u8,
     // nesting depth at which this local was declared
     depth: u32,
+    // true when resolveUpvalue finds a local in the enclosing compiler
+    is_captured: bool,
+};
+
+const UpValue = struct {
+    // Slot index in the enclosing function
+    index: u16,
+
+    // true = captures a local directly, false = captures an upvalue
+    is_local: bool,
 };
 
 pub const CompileError = error{
@@ -35,24 +47,30 @@ pub const Compiler = struct {
     program: *Program,
     chunk: *Chunk,
     locals: std.ArrayList(Local),
+    upvalues: std.ArrayList(UpValue),
     scope_depth: u32,
     // Set of declared enum type names; used to detect when a zero-field variant references
     // an existing enum (nested enum coercion at runtime)
     known_enum_names: *std.StringHashMapUnmanaged(void),
+    // Body field default expressions keyed by struct name; compiled inline at each construct site
+    body_defaults: *std.StringHashMapUnmanaged([]const ast.Expression),
     allocator: std.mem.Allocator,
 
     // Static entry point to compile statements to a Program
     pub fn compile(statements: []const ast.Statement, allocator: std.mem.Allocator) CompileError!Program {
         var program = Program.init(allocator);
-        const known_enum_names = std.StringHashMapUnmanaged(void);
+        var known_enum_names = std.StringHashMapUnmanaged(void){};
+        var body_defaults = std.StringHashMapUnmanaged([]const ast.Expression){};
 
         var compiler = Compiler{
             .enclosing = null,
             .program = &program,
             .chunk = &program.chunk,
             .locals = .{},
+            .upvalues = .{},
             .scope_depth = 0,
             .known_enum_names = &known_enum_names,
+            .body_defaults = &body_defaults,
             .allocator = allocator,
         };
         errdefer compiler.deinit();
@@ -65,6 +83,7 @@ pub const Compiler = struct {
     pub fn init(
         program: *Program,
         known_enum_names: *std.StringHashMapUnmanaged(void),
+        body_defaults: *std.StringHashMapUnmanaged([]const ast.Expression),
         allocator: std.mem.Allocator,
     ) Compiler {
         return .{
@@ -72,14 +91,17 @@ pub const Compiler = struct {
             .program = program,
             .chunk = &program.chunk,
             .locals = .{},
+            .upvalues = .{},
             .scope_depth = 0,
             .known_enum_names = known_enum_names,
+            .body_defaults = body_defaults,
             .allocator = allocator,
         };
     }
 
     pub fn deinit(self: *Compiler) void {
         self.locals.deinit(self.allocator);
+        self.upvalues.deinit(self.allocator);
     }
 
     // NOTE: -- Statements
@@ -113,8 +135,7 @@ pub const Compiler = struct {
 
     fn compileFnDeclarationStatement(self: *Compiler, fn_decl: ast.Statement.FnDeclaration) CompileError!void {
         // Compile the FnObject
-        const fn_idx = try self.compileFnObject(fn_decl, fn_decl.name.lexeme, @intCast(fn_decl.params.len));
-        try self.emitConstant(.{ .function = fn_idx }, fn_decl.name.line);
+        try self.compileFnObject(fn_decl, fn_decl.name.lexeme, @intCast(fn_decl.params.len));
 
         // Declare the function name as a local (functions are first-class values)
         // If we are the the top-level, store as a global
@@ -143,8 +164,7 @@ pub const Compiler = struct {
         // Allocate methods
         for (struct_decl.methods) |method| {
             // Compile the FnObject
-            const method_idx = try self.compileFnObject(method, types.SELF_PARAMETER, @intCast(method.params.len + 1));
-            try self.emitConstant(.{ .function = method_idx }, method.name.line);
+            try self.compileFnObject(method, types.SELF_PARAMETER, @intCast(method.params.len + 1));
 
             // Register the qualified name TypeName.methodName
             // Not free'd because it will be owned by the chunk constants
@@ -160,10 +180,18 @@ pub const Compiler = struct {
             .kind = struct_decl.kind,
             .field_names = field_names,
             .body_field_names = body_field_names,
-            .body_default_fn = null,
         };
 
         _ = try self.program.addStructDef(struct_obj);
+
+        // Store body field default expressions for inline compilation at construct sites
+        if (struct_decl.body_fields.len > 0) {
+            const defaults = try self.allocator.alloc(ast.Expression, struct_decl.body_fields.len);
+            for (struct_decl.body_fields, 0..) |field, i| {
+                defaults[i] = field.default_value orelse unreachable;
+            }
+            try self.body_defaults.put(self.allocator, struct_decl.name.lexeme, defaults);
+        }
     }
 
     fn compileEnumDeclarationStatement(self: *Compiler, ed: ast.Statement.EnumDeclaration) CompileError!void {
@@ -198,7 +226,6 @@ pub const Compiler = struct {
                 .kind = .case,
                 .field_names = field_names,
                 .body_field_names = &.{},
-                .body_default_fn = null,
             });
         }
 
@@ -291,6 +318,9 @@ pub const Compiler = struct {
         if (self.resolveLocal(variable.token.lexeme)) |slot| {
             try self.emitOp(OpCode.get_local, variable.token.line);
             try self.emitU16(slot, variable.token.line);
+        } else if (self.resolveUpvalue(variable.token.lexeme)) |slot| {
+            try self.emitOp(OpCode.get_upvalue, variable.token.line);
+            try self.emitU16(slot, variable.token.line);
         } else {
             const idx = try self.chunk.findOrAddConstant(.{ .string = variable.token.lexeme });
             try self.emitOp(OpCode.get_global, variable.token.line);
@@ -299,11 +329,19 @@ pub const Compiler = struct {
     }
 
     fn compileVarAssignement(self: *Compiler, va: *const ast.Expression.VarAssignment) CompileError!void {
-        const slot = self.resolveLocal(va.token.lexeme) orelse return error.UndefinedVariable;
-        try self.compileExpression(va.value);
+        if (self.resolveLocal(va.token.lexeme)) |slot| {
+            try self.compileExpression(va.value);
 
-        try self.emitOp(OpCode.set_local, va.token.line);
-        try self.emitU16(slot, va.token.line);
+            try self.emitOp(OpCode.set_local, va.token.line);
+            try self.emitU16(slot, va.token.line);
+        } else if (self.resolveUpvalue(va.token.lexeme)) |slot| {
+            try self.compileExpression(va.value);
+
+            try self.emitOp(OpCode.set_upvalue, va.token.line);
+            try self.emitU16(slot, va.token.line);
+        } else {
+            return error.UndefinedVariable;
+        }
     }
 
     fn compileBlock(self: *Compiler, block: *const ast.Expression.Block) CompileError!void {
@@ -360,9 +398,16 @@ pub const Compiler = struct {
             }
             return error.UndefinedStruct;
         };
-        // Compile the arguments
+        // Compile the constructor arguments
         for (si.args) |arg| {
             try self.compileExpression(arg);
+        }
+
+        // Compile body field default expressions inline
+        if (self.body_defaults.get(si.name.lexeme)) |defaults| {
+            for (defaults) |default| {
+                try self.compileExpression(default);
+            }
         }
 
         // Emit construct opcode + struct def index
@@ -561,15 +606,24 @@ pub const Compiler = struct {
                 // Pop the remaining local variables, [0..scope_locals_count[,
                 // so the patched result is not popped
                 for (0..scope_locals_count) |_| {
-                    _ = self.locals.pop();
-                    try self.emitOp(OpCode.pop, line);
+                    const local = self.locals.pop().?;
+                    if (local.is_captured) {
+                        try self.emitOp(.close_upvalue, line);
+                    } else {
+                        try self.emitOp(OpCode.pop, line);
+                    }
                 }
             }
         } else {
             // Remove all locals that are out of scope
             while (self.locals.items.len > 0 and self.locals.getLast().depth > self.scope_depth) {
-                _ = self.locals.pop();
-                try self.emitOp(OpCode.pop, line);
+                const local = self.locals.pop().?;
+
+                if (local.is_captured) {
+                    try self.emitOp(.close_upvalue, line);
+                } else {
+                    try self.emitOp(OpCode.pop, line);
+                }
             }
         }
     }
@@ -582,6 +636,7 @@ pub const Compiler = struct {
         try self.locals.append(self.allocator, .{
             .name = name,
             .depth = self.scope_depth,
+            .is_captured = false,
         });
     }
 
@@ -596,6 +651,33 @@ pub const Compiler = struct {
         }
 
         return null;
+    }
+
+    fn resolveUpvalue(self: *Compiler, name: []const u8) ?u16 {
+        const enclosing = self.enclosing orelse return null;
+
+        if (enclosing.resolveLocal(name)) |local_idx| {
+            enclosing.locals.items[local_idx].is_captured = true;
+            return self.addUpValue(@intCast(local_idx), true);
+        }
+
+        if (enclosing.resolveUpvalue(name)) |upvalue_idx| {
+            return self.addUpValue(@intCast(upvalue_idx), false);
+        }
+
+        return null;
+    }
+
+    fn addUpValue(self: *Compiler, index: u16, is_local: bool) u16 {
+        // Dedup
+        for (self.upvalues.items, 0..) |uv, i| {
+            if (uv.index == index and uv.is_local == is_local) {
+                return @intCast(i);
+            }
+        }
+
+        self.upvalues.append(self.allocator, .{ .index = index, .is_local = is_local }) catch unreachable;
+        return @intCast(self.upvalues.items.len - 1);
     }
 
     // Returns the qualified name EnumName.VariantName
@@ -643,7 +725,7 @@ pub const Compiler = struct {
         fn_decl: ast.Statement.FnDeclaration,
         slot_0_name: []const u8,
         arity: u8,
-    ) CompileError!u16 {
+    ) CompileError!void {
         // For fallible functions (return type E!T), compute the synthesized result enum
         // name (e.g. MathError!Int) so that callUserFn can wrap the return value
         // in the correct Ok/Err variant at runtime.
@@ -670,6 +752,7 @@ pub const Compiler = struct {
             .arity = arity,
             .chunk = Chunk.init(self.allocator),
             .result_name = result_name,
+            .upvalue_count = 0,
         };
 
         // Create nested compiler
@@ -678,8 +761,10 @@ pub const Compiler = struct {
             .program = self.program,
             .chunk = &fn_obj.chunk,
             .locals = .{},
+            .upvalues = .{},
             .scope_depth = 0,
             .known_enum_names = self.known_enum_names, // Share the same map
+            .body_defaults = self.body_defaults, // Share the same map
             .allocator = self.allocator,
         };
 
@@ -700,8 +785,23 @@ pub const Compiler = struct {
         child.locals.deinit(self.allocator);
 
         // Emit the fn object into the enclosing chunk
-        return try self.program.addFunction(fn_obj);
+        fn_obj.upvalue_count = @intCast(child.upvalues.items.len);
+        const fn_idx = try self.program.addFunction(fn_obj);
+
+        // Emit as closure if upvalues were captured, plain function otherwise
+        if (child.upvalues.items.len > 0) {
+            const line = fn_decl.name.line;
+            try self.emitOp(OpCode.closure, line);
+            try self.emitU16(fn_idx, line);
+            for (child.upvalues.items) |uv| {
+                try self.emitU8(@intFromBool(uv.is_local), line);
+                try self.emitU16(uv.index, line);
+            }
+        } else {
+            try self.emitConstant(.{ .function = fn_idx }, fn_decl.name.line);
+        }
     }
+
     const BodyResult = struct {
         has_result: bool,
         line: usize,

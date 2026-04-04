@@ -12,10 +12,20 @@ const Compiler = vm_pkg.Compiler;
 const ast = pipe.ast;
 const Token = pipe.Token;
 const RuntimeContext = pipe.RuntimeContext;
+const helpers = @import("helpers");
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// Run a source string through the full pipeline (lexer → parser → compiler → VM).
+/// Returns only the value — uses an arena so closure/upvalue allocations don't leak.
+fn runSource(source: []const u8) !Value {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const result = try helpers.evaluateVm(source, arena.allocator());
+    return result.value;
+}
 
 /// Build a chunk, run it, return the last value on the stack (from return).
 /// Takes ownership of the chunk — caller must NOT deinit it.
@@ -845,7 +855,6 @@ test "construct then get_field returns constructor field" {
         .field_names = field_names[0..],
         .body_field_names = body_field_names[0..],
         .kind = StructKind.case,
-        .body_default_fn = null,
     }};
 
     const result = try runChunkWithStructDefs(&chunk, defs[0..]);
@@ -893,7 +902,6 @@ test "set_field mutates instance field" {
         .field_names = field_names[0..],
         .body_field_names = body_field_names[0..],
         .kind = StructKind.plain,
-        .body_default_fn = null,
     }};
 
     const result = try runChunkWithStructDefs(&chunk, defs[0..]);
@@ -925,7 +933,6 @@ test "get_field on missing name is UndefinedField" {
         .field_names = field_names[0..],
         .body_field_names = body_field_names[0..],
         .kind = StructKind.plain,
-        .body_default_fn = null,
     }};
 
     try std.testing.expectError(error.UndefinedField, runChunkWithStructDefs(&chunk, defs[0..]));
@@ -972,7 +979,8 @@ fn runCompiled(
     defer program.deinit();
 
     var known_enum_names: std.StringHashMapUnmanaged(void) = .{};
-    var compiler = Compiler.init(&program, &known_enum_names, allocator);
+    var body_defaults: std.StringHashMapUnmanaged([]const ast.Expression) = .{};
+    var compiler = Compiler.init(&program, &known_enum_names, &body_defaults, allocator);
     defer compiler.deinit();
 
     for (statements) |stmt| {
@@ -1107,6 +1115,49 @@ test "compiler: field assignment and re-read" {
 
     const result = try runCompiled(allocator, &.{ struct_decl, var_decl, assign_stmt }, .{ .field_access = fa });
     try std.testing.expect(result.eql(.{ .string = "Bob" }));
+}
+
+test "compiler: struct body field defaults" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    // case struct User(const id: Int) { const tag: Str = "user"; }
+    const fields = [_]ast.Statement.FieldDeclaration{
+        .{ .name = ident("id"), .type_annotation = dummyType(), .mutability = .constant, .default_value = null },
+    };
+    const body_fields = [_]ast.Statement.FieldDeclaration{
+        .{ .name = ident("tag"), .type_annotation = dummyType(), .mutability = .constant, .default_value = .{
+            .literal = .{ .token = ident("user"), .value = .{ .string = "user" } },
+        } },
+    };
+    const struct_decl = ast.Statement{ .struct_declaration = .{
+        .name = ident("User"),
+        .fields = fields[0..],
+        .body_fields = body_fields[0..],
+        .kind = .case,
+        .methods = &.{},
+    } };
+
+    // var u = User(1)
+    const args = [_]ast.Expression{
+        .{ .literal = .{ .token = ident("1"), .value = .{ .int = 1 } } },
+    };
+    const si = try allocator.create(ast.Expression.StructInit);
+    si.* = .{ .name = ident("User"), .args = args[0..] };
+    const var_decl = ast.Statement{ .var_declaration = .{
+        .name = ident("u"),
+        .type_annotation = null,
+        .initializer = .{ .struct_init = si },
+        .mutability = .constant,
+    } };
+
+    // u.tag
+    const fa = try allocator.create(ast.Expression.FieldAccess);
+    fa.* = .{ .object = .{ .variable = .{ .token = ident("u") } }, .name = ident("tag") };
+
+    const result = try runCompiled(allocator, &.{ struct_decl, var_decl }, .{ .field_access = fa });
+    try std.testing.expect(result.eql(.{ .string = "user" }));
 }
 
 test "compiler: nested field access a.b.c" {
@@ -1726,7 +1777,8 @@ fn runCompiledCapturingOutput(
     defer program.deinit();
 
     var known_enum_names: std.StringHashMapUnmanaged(void) = .{};
-    var compiler = Compiler.init(&program, &known_enum_names, allocator);
+    var body_defaults: std.StringHashMapUnmanaged([]const ast.Expression) = .{};
+    var compiler = Compiler.init(&program, &known_enum_names, &body_defaults, allocator);
     defer compiler.deinit();
 
     for (statements) |stmt| {
@@ -1842,4 +1894,76 @@ test "print: falls back to default format when no to_str method" {
 
     const out = try runCompiledCapturingOutput(allocator, &.{ struct_decl, var_decl }, .{ .fn_call = print_call });
     try std.testing.expectEqualStrings("<Plain>\n", out.output);
+}
+
+// ===========================================================================
+// Closures
+// ===========================================================================
+
+test "closure: capture variable from enclosing scope" {
+    const result = try runSource("var x = 10; fn get() Int { return x; } get();");
+    try std.testing.expect(result.eql(.{ .int = 10 }));
+}
+
+test "closure: mutate captured variable" {
+    const result = try runSource(
+        \\var x = 0;
+        \\fn inc() Int { x = x + 1; return x; }
+        \\inc();
+        \\inc();
+        \\x;
+    );
+    try std.testing.expect(result.eql(.{ .int = 2 }));
+}
+
+test "closure: nested closures" {
+    const result = try runSource(
+        \\fn outer() Int {
+        \\    var x = 10;
+        \\    fn inner() Int { return x; }
+        \\    return inner();
+        \\}
+        \\outer();
+    );
+    try std.testing.expect(result.eql(.{ .int = 10 }));
+}
+
+test "closure: shared captured variable across closures" {
+    const result = try runSource(
+        \\var count = 0;
+        \\fn inc() Int { count = count + 1; return count; }
+        \\fn get() Int { return count; }
+        \\inc();
+        \\inc();
+        \\get();
+    );
+    try std.testing.expect(result.eql(.{ .int = 2 }));
+}
+
+test "closure: captured variable survives enclosing scope" {
+    const result = try runSource(
+        \\fn make_counter() Int {
+        \\    var count = 0;
+        \\    fn inc() Int { count = count + 1; return count; }
+        \\    inc();
+        \\    inc();
+        \\    return inc();
+        \\}
+        \\make_counter();
+    );
+    try std.testing.expect(result.eql(.{ .int = 3 }));
+}
+
+test "closure: mutation visible across closures" {
+    const result = try runSource(
+        \\fn test_mutation() Int {
+        \\    var x = 0;
+        \\    fn set(v: Int) Int { x = v; return x; }
+        \\    fn get() Int { return x; }
+        \\    set(42);
+        \\    return get();
+        \\}
+        \\test_mutation();
+    );
+    try std.testing.expect(result.eql(.{ .int = 42 }));
 }

@@ -98,6 +98,18 @@ pub const OpCode = enum(u8) {
     // Notes: writes top-of-stack value to slot, does not pop it.
     set_local,
 
+    // Upvalues
+    // Encoding: get_upvalue u16
+    // Operands: slot_idx: u16 (index into closure's upvalue array)
+    // Stack: [...] -> [..., upvalue_value]
+    get_upvalue,
+
+    // Encoding: set_upvalue u16
+    // Operands: slot_idx: u16 (index into closure's upvalue array)
+    // Stack: [..., value] -> [..., value]
+    // Notes: writes top-of-stack value to upvalue, does not pop it.
+    set_upvalue,
+
     // Global variables
     // Encoding: get_global u16
     // Operands: name_const_idx: u16 (constant pool string)
@@ -144,4 +156,15 @@ pub const OpCode = enum(u8) {
     // Stack: [..., arg1, ..., argN] -> [..., instance]
     // Notes: pops N args using struct metadata, creates StructInstance, pushes it.
     construct,
+
+    // Encoding: clsure u16 (u8 u16)*
+    // Operands: fn_idx: u16, then for each upvalue: is_local: u8, index: u16
+    // Stack: [...] -> [..., closure]
+    closure,
+
+    // Encoding: close_upvalue
+    // Operands: none
+    // Stack: [..., local] -> [...]
+    // Notes. Closes the topmost open upvalue pointing at stack_top - 1, then pops
+    close_upvalue,
 };

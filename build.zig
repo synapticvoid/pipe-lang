@@ -218,6 +218,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .imports = &.{
                 .{ .name = "pipe", .module = mod },
+                .{ .name = "helpers", .module = helpers_mod },
             },
         }),
     });
