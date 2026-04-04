@@ -15,10 +15,20 @@ const StructDef = prg.StructDef;
 const ast = @import("../ast.zig");
 const Value = @import("value.zig").Value;
 
+// Local variable
+// We store its name and nesting depth
 const Local = struct {
     name: []const u8,
     // nesting depth at which this local was declared
     depth: u32,
+};
+
+const UpValue = struct {
+    // Slot index in the enclosing function
+    index: u8,
+
+    // true = captures a local directly, false = captures an upvalue
+    is_local: bool,
 };
 
 pub const CompileError = error{
@@ -35,6 +45,7 @@ pub const Compiler = struct {
     program: *Program,
     chunk: *Chunk,
     locals: std.ArrayList(Local),
+    upvalues: std.ArrayList(UpValue),
     scope_depth: u32,
     // Set of declared enum type names; used to detect when a zero-field variant references
     // an existing enum (nested enum coercion at runtime)
@@ -51,6 +62,7 @@ pub const Compiler = struct {
             .program = &program,
             .chunk = &program.chunk,
             .locals = .{},
+            .upvalues = .{},
             .scope_depth = 0,
             .known_enum_names = &known_enum_names,
             .allocator = allocator,
@@ -72,6 +84,7 @@ pub const Compiler = struct {
             .program = program,
             .chunk = &program.chunk,
             .locals = .{},
+            .upvalues = .{},
             .scope_depth = 0,
             .known_enum_names = known_enum_names,
             .allocator = allocator,
@@ -80,6 +93,7 @@ pub const Compiler = struct {
 
     pub fn deinit(self: *Compiler) void {
         self.locals.deinit(self.allocator);
+        self.upvalues.deinit(self.allocator);
     }
 
     // NOTE: -- Statements
@@ -596,6 +610,19 @@ pub const Compiler = struct {
         }
 
         return null;
+    }
+
+    fn resolveUpvalue(self: *Compiler, index: u8, is_local: bool) ?u16 {
+        // Check if we already captured this exact upvalue
+        for (self.upvalues.itemes, 0..) |uv, i| {
+            if (uv.index == index and uv.is_local == is_local) {
+                return @intCast(i);
+            }
+        }
+
+        // We never captured this upvalue before, so add it
+        self.upvalues.append(self.allocator, .{ .index = index, .is_local = is_local }) catch return null;
+        return @intCast(self.upvalues.items.len - 1);
     }
 
     // Returns the qualified name EnumName.VariantName
