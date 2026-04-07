@@ -376,6 +376,18 @@ pub const Compiler = struct {
     }
 
     fn compileFnCall(self: *Compiler, fn_call: *const ast.Expression.FnCall) CompileError!void {
+        // If the callee is a known struct name, compile as a construct instead.
+        // The parser produces fn_call nodes for struct construction (e.g. User(1)),
+        // but the VM uses the construct opcode for structs.
+        if (fn_call.callee == .variable) {
+            const name = fn_call.callee.variable.token.lexeme;
+            for (self.program.struct_defs.items, 0..) |def, i| {
+                if (std.mem.eql(u8, def.name, name)) {
+                    return self.compileConstructFromCall(fn_call, @intCast(i));
+                }
+            }
+        }
+
         // Compile the callee and the args
         try self.compileExpression(fn_call.callee);
         for (fn_call.args) |arg| {
@@ -386,6 +398,25 @@ pub const Compiler = struct {
         const line = fn_call.callee.line();
         try self.emitOp(OpCode.call, line);
         try self.emitU8(@intCast(fn_call.args.len), line);
+    }
+
+    fn compileConstructFromCall(self: *Compiler, fn_call: *const ast.Expression.FnCall, def_idx: u16) CompileError!void {
+        const line = fn_call.callee.line();
+        const name = self.program.struct_defs.items[def_idx].name;
+
+        for (fn_call.args) |arg| {
+            try self.compileExpression(arg);
+        }
+
+        // Compile body field default expressions inline
+        if (self.body_defaults.get(name)) |defaults| {
+            for (defaults) |default| {
+                try self.compileExpression(default);
+            }
+        }
+
+        try self.emitOp(OpCode.construct, line);
+        try self.emitU16(def_idx, line);
     }
 
     fn compileStructInit(self: *Compiler, si: *const ast.Expression.StructInit) CompileError!void {

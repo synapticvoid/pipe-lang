@@ -216,6 +216,39 @@ test "parity: catch with binding gives access to error value" {
     });
 }
 
+// =========================================================================
+// Structs
+// =========================================================================
+
+test "parity: struct construction and field access" {
+    try expectParity(.{
+        \\case struct User(const id: Int, const name: Str);
+        \\const u = User(1, "Alice");
+        \\u.name;
+    });
+}
+
+test "parity: struct body field with default" {
+    try expectParity(.{
+        \\case struct User(const id: Int) {
+        \\    const tag: Str = "user";
+        \\}
+        \\const u = User(1);
+        \\u.tag;
+    });
+}
+
+test "parity: struct body field excluded from equals" {
+    try expectParity(.{
+        \\case struct User(const id: Int) {
+        \\    var tag: Str = "a";
+        \\}
+        \\const a = User(1);
+        \\const b = User(1);
+        \\a == b;
+    });
+}
+
 test "parity: nested try propagation across call frames" {
     try expectParity(.{
         \\error enum E { Fail, }
