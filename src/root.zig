@@ -1,5 +1,4 @@
 pub const ast = @import("ast.zig");
-pub const interpreter = @import("interpreter/root.zig");
 pub const Lexer = @import("lexer.zig").Lexer;
 pub const Parser = @import("parser.zig").Parser;
 pub const RuntimeContext = @import("runtime.zig").RuntimeContext;

@@ -166,18 +166,6 @@ pub fn build(b: *std.Build) void {
     });
     const run_parser_tests = b.addRunArtifact(parser_tests);
 
-    const interpreter_tests = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/tests/interpreter_test.zig"),
-            .target = target,
-            .imports = &.{
-                .{ .name = "pipe", .module = mod },
-                .{ .name = "helpers", .module = helpers_mod },
-            },
-        }),
-    });
-    const run_interpreter_tests = b.addRunArtifact(interpreter_tests);
-
     const type_checker_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/tests/type_checker_test.zig"),
@@ -244,7 +232,6 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_exe_tests.step);
     test_step.dependOn(&run_lexer_tests.step);
     test_step.dependOn(&run_parser_tests.step);
-    test_step.dependOn(&run_interpreter_tests.step);
     test_step.dependOn(&run_type_checker_tests.step);
     test_step.dependOn(&run_bytecode_chunk_tests.step);
     test_step.dependOn(&run_bytecode_disassemble_tests.step);
